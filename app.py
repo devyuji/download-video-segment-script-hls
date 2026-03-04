@@ -19,8 +19,15 @@ failed_download: list = []
 semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
 headers = {
     "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0",
+    "origin": "https://turbovidhls.com"
 }
 
+# ==== args list =====
+args = sys.argv
+check_for_invalid = "-x" in args
+start_failed = "-f" in args
+combine_video = "-c" in args
+# ===================
 
 # if url are base64 encoded
 def decode_segment(encoded_part):
@@ -40,7 +47,7 @@ def decode_segment(encoded_part):
     # only take the actual media URL (before |)
     real_url = decoded.split("|")[0]
 
-    return real_url
+    return real_url.strip()
 
 
 async def download_segement(session: aiohttp.ClientSession, url: str, i: int):
@@ -48,21 +55,45 @@ async def download_segement(session: aiohttp.ClientSession, url: str, i: int):
         try:
             print(f"Downloading segment_{i}.ts")
 
-            asyncio.sleep(0.1)
+            await asyncio.sleep(0.2)
             async with session.get(url, headers=headers, timeout=10) as response:
                 response.raise_for_status()
 
                 file_path = os.path.join(output_folder, f"segment_{i}.ts")
 
                 content = await response.read()
-                with open(file_path, "wb") as f:
-                    f.write(content)
+
+                if check_for_invalid:
+                    clean_data(content, file_path)
+                else:
+                    with open(file_path, "wb") as f:
+                        f.write(content)
 
         except Exception as e:
             print(e)
             failed_download.append({"url": url, "index": i})
 
             print(f"Failed to download {url}")
+
+def clean_data(data , file_path):
+    max_length = min(len(data), 2040)
+
+    for i in range(max_length):
+
+        if data[i] == 0x47:
+
+            # Verify it's not a fluke by checking the next packet (188 bytes later)
+            # and a third packet (376 bytes later) for certainty.
+            if (i + 188 < len(data) and data[i + 188] == 0x47 and i + 376 < len(data) and data[i + 376] == 0x47):
+            
+                # 3. We found the start of the video stream!
+                print(f"Fake header detected. Cropping {i} bytes.")
+                
+                # Slice the bytes object to drop the fake header
+                cleaned_data = data[i:] 
+                
+                with open(file_path, "wb") as f:
+                    f.write(cleaned_data)
 
 
 async def download(urls: list[str]):
@@ -80,17 +111,24 @@ def download_sync(urls: list):
             try:
                 print(f"Downloading segment_{i['index']}.ts - {count_retry}")
 
-                res = requests.get(i["url"], headers=headers)
+                url = i["url"].strip()
+                res = requests.get(url, headers=headers)
                 res.raise_for_status()
+
+                content = res.content
 
                 file_path = os.path.join(output_folder, f"segment_{i['index']}.ts")
 
-                with open(file_path, "wb") as f:
-                    f.write(res.content)
+                if check_for_invalid:
+                    clean_data(content, file_path)
+                else:
+                    with open(file_path, "wb") as f:
+                        f.write(content)
 
                 break
 
-            except Exception:
+            except Exception as e:
+                print(e)
                 print(f"Failed to download segment_{i['index']}.ts - {i['url']}")
 
                 count_retry += 1
@@ -106,12 +144,6 @@ def create_files(total):
 
 async def main():
     segment_urls: list[str] = []
-
-    args = sys.argv
-
-    start_failed = "-f" in args
-
-    combine_video = "-c" in args
 
     if start_failed:
         with open("fail.json", "r") as f:
@@ -144,26 +176,28 @@ async def main():
 
         return
 
+    # ========== this block of code is depend on m3u8_file =================
     with open(m3u8_file, "r", encoding="utf-8") as f:
         for line in f:
-            if line.startswith("/p/"):
+            # if line.startswith("/p/"):
+            if line.startswith("https://"):
                 try:
-                    url = decode_segment(line)
-                    segment_urls.append(url)
+                    # url = decode_segment(line)
+                    # base = (
+                    #     "https://surrit.com/c5bf1a4a-ea0b-401f-9969-93056468b611/1080p/"
+                    # )
+
+                    # url = f"{base}{line}"
+                    segment_urls.append(line)
                 except Exception as e:
                     print(e)
                     print("Failed to decode:", line)
-            # if line.startswith("https:"):
-            #     try:
-            #         url = line.strip()
-            #         segment_urls.append(url)
-            #     except Exception:
-            #         print("Failed  to decode")
+# ===============================================================
 
     total_segment = len(segment_urls)
     print(f"Found {total_segment} segments")
 
-    # await download(segment_urls)
+    await download(segment_urls[:10])
 
     print("Total failed download - ", len(failed_download))
 
