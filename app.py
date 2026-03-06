@@ -6,9 +6,10 @@ import asyncio
 import aiohttp
 import json
 import subprocess
+import io
 
 # ===== CONFIG =====
-m3u8_file = "EXTM3U.txt"  # your uploaded file name
+m3u8_file = "playlist.txt"  # your uploaded file name
 output_folder = "segments"
 MAX_CONCURRENCY = 10
 DOWNLOAD_RETRY = 10
@@ -19,7 +20,6 @@ failed_download: list = []
 semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
 headers = {
     "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0",
-    "origin": "https://turbovidhls.com"
 }
 
 # ==== args list =====
@@ -27,7 +27,8 @@ args = sys.argv
 check_for_invalid = "-x" in args
 start_failed = "-f" in args
 combine_video = "-c" in args
-# ===================
+# ====================
+
 
 # if url are base64 encoded
 def decode_segment(encoded_part):
@@ -50,7 +51,7 @@ def decode_segment(encoded_part):
     return real_url.strip()
 
 
-async def download_segement(session: aiohttp.ClientSession, url: str, i: int):
+async def download_segment(session: aiohttp.ClientSession, url: str, i: int):
     async with semaphore:
         try:
             print(f"Downloading segment_{i}.ts")
@@ -75,30 +76,35 @@ async def download_segement(session: aiohttp.ClientSession, url: str, i: int):
 
             print(f"Failed to download {url}")
 
-def clean_data(data , file_path):
+
+def clean_data(data, file_path):
     max_length = min(len(data), 2040)
 
     for i in range(max_length):
-
         if data[i] == 0x47:
-
             # Verify it's not a fluke by checking the next packet (188 bytes later)
             # and a third packet (376 bytes later) for certainty.
-            if (i + 188 < len(data) and data[i + 188] == 0x47 and i + 376 < len(data) and data[i + 376] == 0x47):
-            
+            if (
+                i + 188 < len(data)
+                and data[i + 188] == 0x47
+                and i + 376 < len(data)
+                and data[i + 376] == 0x47
+            ):
                 # 3. We found the start of the video stream!
-                print(f"Fake header detected. Cropping {i} bytes.")
-                
+                # print(f"Fake header detected. Cropping {i} bytes.")
+
                 # Slice the bytes object to drop the fake header
-                cleaned_data = data[i:] 
-                
+                cleaned_data = data[i:]
+
                 with open(file_path, "wb") as f:
                     f.write(cleaned_data)
+
+                break
 
 
 async def download(urls: list[str]):
     async with aiohttp.ClientSession() as session:
-        tasks = [download_segement(session, url, i) for i, url in enumerate(urls)]
+        tasks = [download_segment(session, url, i) for i, url in enumerate(urls)]
 
         await asyncio.gather(*tasks)
 
@@ -134,7 +140,7 @@ def download_sync(urls: list):
                 count_retry += 1
 
 
-def create_files(total):
+def create_segment_file(total):
     segment_file = os.path.join(output_folder, "files.txt")
 
     with open(segment_file, "w") as f:
@@ -192,12 +198,12 @@ async def main():
                 except Exception as e:
                     print(e)
                     print("Failed to decode:", line)
-# ===============================================================
+    # ===============================================================
 
     total_segment = len(segment_urls)
     print(f"Found {total_segment} segments")
 
-    await download(segment_urls[:10])
+    await download(segment_urls)
 
     print("Total failed download - ", len(failed_download))
 
@@ -205,7 +211,7 @@ async def main():
     with open("fail.json", "w") as f:
         json.dump(failed_download, f)
 
-    create_files(total_segment)
+    create_segment_file(total_segment)
 
     print("Download Complete.")
 

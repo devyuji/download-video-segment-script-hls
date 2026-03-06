@@ -1,7 +1,5 @@
 # Script to download files from hsl encode videos.
 
-# missavtv.com
-
 ## Running this script
 
 ` uv run app.py`

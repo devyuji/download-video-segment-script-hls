@@ -12,3 +12,5 @@ EXTM3U.txt
 segments/
 fail.json
 try.py
+*.mp4
+vnt.py
