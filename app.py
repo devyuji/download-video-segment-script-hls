@@ -80,18 +80,18 @@ async def download_segment(session: aiohttp.ClientSession, url: str, i: int):
 def clean_data(data, file_path):
     max_length = min(len(data), 2040)
 
+    VIDEO_BYTE = 0x47
+
     for i in range(max_length):
-        if data[i] == 0x47:
+        if data[i] == VIDEO_BYTE:
             # Verify it's not a fluke by checking the next packet (188 bytes later)
             # and a third packet (376 bytes later) for certainty.
-            if (
+            if (    
                 i + 188 < len(data)
-                and data[i + 188] == 0x47
+                and data[i + 188] == VIDEO_BYTE
                 and i + 376 < len(data)
-                and data[i + 376] == 0x47
+                and data[i + 376] == VIDEO_BYTE
             ):
-                # 3. We found the start of the video stream!
-                # print(f"Fake header detected. Cropping {i} bytes.")
 
                 # Slice the bytes object to drop the fake header
                 cleaned_data = data[i:]
@@ -140,7 +140,7 @@ def download_sync(urls: list):
                 count_retry += 1
 
 
-def create_segment_file(total):
+def create_segment_file(total: int):
     segment_file = os.path.join(output_folder, "files.txt")
 
     with open(segment_file, "w") as f:
