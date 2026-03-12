@@ -7,9 +7,11 @@ import aiohttp
 import json
 import subprocess
 import io
+from Crypto.Cipher import AES
 
 # ===== CONFIG =====
 m3u8_file = "playlist.txt"  # your uploaded file name
+key_file = "key.txt"
 output_folder = "segments"
 MAX_CONCURRENCY = 10
 DOWNLOAD_RETRY = 10
@@ -21,6 +23,8 @@ semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
 headers = {
     "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0",
 }
+is_encrypted = False
+key = None
 
 # ==== args list =====
 args = sys.argv
@@ -48,7 +52,7 @@ def decode_segment(encoded_part):
     # only take the actual media URL (before |)
     real_url = decoded.split("|")[0]
 
-    return real_url.strip()
+    return real_url
 
 
 async def download_segment(session: aiohttp.ClientSession, url: str, i: int):
@@ -57,24 +61,77 @@ async def download_segment(session: aiohttp.ClientSession, url: str, i: int):
             print(f"Downloading segment_{i}.ts")
 
             await asyncio.sleep(0.2)
-            async with session.get(url, headers=headers, timeout=10) as response:
+            async with session.get(url.strip(), headers=headers, timeout=10) as response:
                 response.raise_for_status()
 
                 file_path = os.path.join(output_folder, f"segment_{i}.ts")
 
                 content = await response.read()
 
-                if check_for_invalid:
-                    clean_data(content, file_path)
+                if is_encrypted:
+                    clean_and_decrypt_segment(content, key, i, file_path)
+
                 else:
-                    with open(file_path, "wb") as f:
-                        f.write(content)
+                    if check_for_invalid:
+                        clean_data(content, file_path)
+                    else:
+                        with open(file_path, "wb") as f:
+                            f.write(content)
 
         except Exception as e:
             print(e)
-            failed_download.append({"url": url, "index": i})
+            failed_download.append({"url": url, "index": i, "is_encrypted": is_encrypted})
 
             print(f"Failed to download {url}")
+
+def clean_and_decrypt_segment(raw_data, key_bytes, sequence_num, output_filename):
+    """
+    Strips the plaintext HTML disguise and decrypts the AES-128 CBC payload.
+    
+    :param raw_data: The raw binary downloaded from the .html URL
+    """
+    print(f"[+] Attempting to crack and clean segment {sequence_num}...")
+
+    # 1. In HLS, the IV is the sequence number padded to 16 bytes (128 bits)
+    iv = sequence_num.to_bytes(16, byteorder='big')
+
+    # We will search the first 2048 bytes for the end of the HTML disguise
+    max_search = min(len(raw_data), 2048)
+    decrypted_clean_data = None
+
+    for i in range(max_search):
+        # 2. Check if the remaining bytes form perfect 16-byte AES blocks
+        remaining_length = len(raw_data) - i
+        if remaining_length % 16 == 0:
+            
+            # 3. We found a valid AES boundary! Let's test it.
+            test_ciphertext = raw_data[i:]
+            
+            # Create a fresh AES cipher for this test
+            cipher = AES.new(key_bytes, AES.MODE_CBC, iv)
+            
+            # Decrypt just the first 16 bytes to save CPU power
+            test_decrypted_block = cipher.decrypt(test_ciphertext[:16])
+            
+            # 4. Did the decryption reveal the hidden Transport Stream?
+            if test_decrypted_block[0] == 0x47:
+                print(f"    -> Success! HTML disguise ends at byte {i}.")
+                
+                # Now decrypt the entire rest of the file
+                cipher_full = AES.new(key_bytes, AES.MODE_CBC, iv)
+                decrypted_clean_data = cipher_full.decrypt(test_ciphertext)
+                break
+
+    if decrypted_clean_data is None:
+        print("[-] Decryption failed. Could not find a valid 0x47 sync byte inside the ciphertext.")
+        return
+
+    # 5. Save the perfectly clean, decrypted .ts file
+    with open(output_filename, "wb") as f:
+        f.write(decrypted_clean_data)
+        
+    print(f"[+] Decrypted video saved to {output_filename}")
+    return
 
 
 def clean_data(data, file_path):
@@ -125,11 +182,18 @@ def download_sync(urls: list):
 
                 file_path = os.path.join(output_folder, f"segment_{i['index']}.ts")
 
-                if check_for_invalid:
-                    clean_data(content, file_path)
+                if i['is_encrypted']:
+                    with open(key_file, "r") as f:
+                        global key
+                        key = f.read().encode("utf-8")
+                    
+                    clean_and_decrypt_segment(content, key, i['index'], file_path)
                 else:
-                    with open(file_path, "wb") as f:
-                        f.write(content)
+                    if check_for_invalid:
+                        clean_data(content, file_path)
+                    else:
+                        with open(file_path, "wb") as f:
+                            f.write(content)
 
                 break
 
@@ -190,7 +254,7 @@ async def main():
                 try:
                     # url = decode_segment(line)
                     # base = (
-                    #     "https://surrit.com/c5bf1a4a-ea0b-401f-9969-93056468b611/1080p/"
+                    #     "https://surrit.com/64b24b84-cb0c-4d1e-a4d7-ebe463eaad6f/1080p/"
                     # )
 
                     # url = f"{base}{line}"
@@ -198,6 +262,15 @@ async def main():
                 except Exception as e:
                     print(e)
                     print("Failed to decode:", line)
+
+            if line.startswith("#EXT-X-KEY"):
+                global is_encrypted
+                global key
+
+                is_encrypted = True
+
+                with open(key_file, "r") as f:
+                    key = f.read().encode("utf-8")
     # ===============================================================
 
     total_segment = len(segment_urls)
