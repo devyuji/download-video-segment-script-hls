@@ -1,41 +1,51 @@
 import sys
+import re
 import base64
 import os
-import requests
 import asyncio
 import aiohttp
 import json
 import subprocess
-import io
 from Crypto.Cipher import AES
+from dataclasses import dataclass, asdict
 
 # ===== CONFIG =====
 m3u8_file = "playlist.txt"  # your uploaded file name
-key_file = "key.txt"
 output_folder = "segments"
 MAX_CONCURRENCY = 10
-DOWNLOAD_RETRY = 10
+DOWNLOAD_RETRY = 5
 # ==================
 
+
+@dataclass
+class FailData:
+    index: int
+    url: str
+    is_encrypted: bool
+    key: str = ""
+
+    def __post_init__(self):
+        self.url = self.url.strip()
+
+
 os.makedirs(output_folder, exist_ok=True)
-failed_download: list = []
+failed_download: list[FailData] = []
 semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
 headers = {
     "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0",
 }
 is_encrypted = False
-key = None
+key: bytes = b""
 
 # ==== args list =====
 args = sys.argv
-check_for_invalid = "-x" in args
 start_failed = "-f" in args
 combine_video = "-c" in args
 # ====================
 
 
 # if url are base64 encoded
-def decode_segment(encoded_part):
+def decode_segment(encoded_part: str) -> str:
     """
     Extract and decode base64 string from /p/<base64>.ext
     """
@@ -55,101 +65,99 @@ def decode_segment(encoded_part):
     return real_url
 
 
-async def download_segment(session: aiohttp.ClientSession, url: str, i: int):
+async def download_segment(
+    session: aiohttp.ClientSession, url: str, index: int
+) -> None:
     async with semaphore:
         try:
-            print(f"Downloading segment_{i}.ts")
+            print(f"Downloading segment_{index}.ts")
 
             await asyncio.sleep(0.2)
-            async with session.get(url.strip(), headers=headers, timeout=10) as response:
+            async with session.get(
+                url.strip(), headers=headers, timeout=10
+            ) as response:
                 response.raise_for_status()
 
-                file_path = os.path.join(output_folder, f"segment_{i}.ts")
+                file_path = os.path.join(output_folder, f"segment_{index}.ts")
 
                 content = await response.read()
 
                 if is_encrypted:
-                    clean_and_decrypt_segment(content, key, i, file_path)
+                    clean_and_decrypt_segment(content, key, index, file_path)
 
-                else:
-                    if check_for_invalid:
-                        clean_data(content, file_path)
-                    else:
-                        with open(file_path, "wb") as f:
-                            f.write(content)
+                    return
+
+                clean_data(content, file_path)
 
         except Exception as e:
             print(e)
-            failed_download.append({"url": url, "index": i, "is_encrypted": is_encrypted})
+            failed_download.append(
+                FailData(
+                    url=url,
+                    index=index,
+                    is_encrypted=is_encrypted,
+                    key=key.decode("utf-8"),
+                )
+            )
 
             print(f"Failed to download {url}")
 
-def clean_and_decrypt_segment(raw_data, key_bytes, sequence_num, output_filename):
+
+def clean_and_decrypt_segment(
+    raw_data: bytes, key_bytes: bytes, sequence_num: int, output_filename: str
+) -> None:
     """
     Strips the plaintext HTML disguise and decrypts the AES-128 CBC payload.
-    
+
     :param raw_data: The raw binary downloaded from the .html URL
     """
     print(f"[+] Attempting to crack and clean segment {sequence_num}...")
 
-    # 1. In HLS, the IV is the sequence number padded to 16 bytes (128 bits)
-    iv = sequence_num.to_bytes(16, byteorder='big')
+    iv = sequence_num.to_bytes(16, byteorder="big")
 
-    # We will search the first 2048 bytes for the end of the HTML disguise
     max_search = min(len(raw_data), 2048)
     decrypted_clean_data = None
 
     for i in range(max_search):
-        # 2. Check if the remaining bytes form perfect 16-byte AES blocks
         remaining_length = len(raw_data) - i
         if remaining_length % 16 == 0:
-            
-            # 3. We found a valid AES boundary! Let's test it.
             test_ciphertext = raw_data[i:]
-            
-            # Create a fresh AES cipher for this test
+
             cipher = AES.new(key_bytes, AES.MODE_CBC, iv)
-            
-            # Decrypt just the first 16 bytes to save CPU power
+
             test_decrypted_block = cipher.decrypt(test_ciphertext[:16])
-            
-            # 4. Did the decryption reveal the hidden Transport Stream?
+
             if test_decrypted_block[0] == 0x47:
                 print(f"    -> Success! HTML disguise ends at byte {i}.")
-                
-                # Now decrypt the entire rest of the file
+
                 cipher_full = AES.new(key_bytes, AES.MODE_CBC, iv)
                 decrypted_clean_data = cipher_full.decrypt(test_ciphertext)
                 break
 
     if decrypted_clean_data is None:
-        print("[-] Decryption failed. Could not find a valid 0x47 sync byte inside the ciphertext.")
+        print(
+            "[-] Decryption failed. Could not find a valid 0x47 sync byte inside the ciphertext."
+        )
         return
 
     # 5. Save the perfectly clean, decrypted .ts file
     with open(output_filename, "wb") as f:
         f.write(decrypted_clean_data)
-        
-    print(f"[+] Decrypted video saved to {output_filename}")
-    return
 
 
-def clean_data(data, file_path):
+def clean_data(data: bytes, file_path: str) -> None:
     max_length = min(len(data), 2040)
 
     VIDEO_BYTE = 0x47
 
     for i in range(max_length):
         if data[i] == VIDEO_BYTE:
-            # Verify it's not a fluke by checking the next packet (188 bytes later)
-            # and a third packet (376 bytes later) for certainty.
-            if (    
+            if (
                 i + 188 < len(data)
                 and data[i + 188] == VIDEO_BYTE
                 and i + 376 < len(data)
                 and data[i + 376] == VIDEO_BYTE
             ):
-
                 # Slice the bytes object to drop the fake header
                 cleaned_data = data[i:]
 
@@ -159,52 +167,48 @@ def clean_data(data, file_path):
                 break
 
 
-async def download(urls: list[str]):
+async def download(urls: list[str]) -> None:
     async with aiohttp.ClientSession() as session:
-        tasks = [download_segment(session, url, i) for i, url in enumerate(urls)]
+        tasks = [
+            download_segment(session, url, index) for index, url in enumerate(urls)
+        ]
 
         await asyncio.gather(*tasks)
 
 
-def download_sync(urls: list):
-    for i in urls:
-        count_retry = 0
+async def download_sync(urls: list[FailData]) -> None:
+    async with aiohttp.ClientSession() as session:
+        for i in urls:
+            count_retry = 0
 
-        while count_retry < DOWNLOAD_RETRY:
-            try:
-                print(f"Downloading segment_{i['index']}.ts - {count_retry}")
+            while count_retry < DOWNLOAD_RETRY:
+                try:
+                    print(f"Downloading segment_{i.index}.ts - {count_retry}")
 
-                url = i["url"].strip()
-                res = requests.get(url, headers=headers)
-                res.raise_for_status()
+                    async with session.get(i.url, headers=headers) as response:
+                        response.raise_for_status()
 
-                content = res.content
+                        content = await response.read()
 
-                file_path = os.path.join(output_folder, f"segment_{i['index']}.ts")
+                        file_path = os.path.join(output_folder, f"segment_{i.index}.ts")
 
-                if i['is_encrypted']:
-                    with open(key_file, "r") as f:
-                        global key
-                        key = f.read().encode("utf-8")
-                    
-                    clean_and_decrypt_segment(content, key, i['index'], file_path)
-                else:
-                    if check_for_invalid:
-                        clean_data(content, file_path)
-                    else:
-                        with open(file_path, "wb") as f:
-                            f.write(content)
+                        if i.is_encrypted:
+                            clean_and_decrypt_segment(
+                                content, i.key.encode("utf-8"), i.index, file_path
+                            )
+                        else:
+                            clean_data(content, file_path)
 
-                break
+                        break
 
-            except Exception as e:
-                print(e)
-                print(f"Failed to download segment_{i['index']}.ts - {i['url']}")
+                except Exception as e:
+                    print(e)
+                    print(f"Failed to download segment_{i.index}.ts - {i.url}")
 
-                count_retry += 1
+                    count_retry += 1
 
 
-def create_segment_file(total: int):
+def create_segment_file(total: int) -> None:
     segment_file = os.path.join(output_folder, "files.txt")
 
     with open(segment_file, "w") as f:
@@ -212,13 +216,37 @@ def create_segment_file(total: int):
             f.write(f"file 'segment_{i}.ts'\n")
 
 
-async def main():
+def run_combine_video() -> None:
+    cmd = [
+        "ffmpeg",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        "segments/files.txt",
+        "-c",
+        "copy",
+        "output.mp4",
+    ]
+
+    result = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True)
+
+    for i in result.stdout:
+        print(i.strip())
+
+
+async def main() -> None:
     segment_urls: list[str] = []
 
     if start_failed:
         with open("fail.json", "r") as f:
+            global failed_download
+
             data = json.load(f)
-            download_sync(data)
+            urls = [FailData(**i) for i in data]
+            failed_download = urls
+            await download_sync(urls)
 
             print("Download Complete")
 
@@ -226,24 +254,7 @@ async def main():
 
     # running ffmpeg to combine segment
     if combine_video:
-        cmd = [
-            "ffmpeg",
-            "-f",
-            "concat",
-            "-safe",
-            "0",
-            "-i",
-            "segments/files.txt",
-            "-c",
-            "copy",
-            "output.mp4",
-        ]
-
-        result = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True)
-
-        for i in result.stdout:
-            print(i.strip())
-
+        run_combine_video()
         return
 
     # ========== this block of code is depend on m3u8_file =================
@@ -253,9 +264,7 @@ async def main():
             if line.startswith("https://"):
                 try:
                     # url = decode_segment(line)
-                    # base = (
-                    #     "https://surrit.com/64b24b84-cb0c-4d1e-a4d7-ebe463eaad6f/1080p/"
-                    # )
+                    # base = "https://surrit.com/fdd9638e-28a0-4d75-9093-e80f0bdbc97f/1920x1080/"
 
                     # url = f"{base}{line}"
                     segment_urls.append(line)
@@ -269,8 +278,19 @@ async def main():
 
                 is_encrypted = True
 
-                with open(key_file, "r") as f:
-                    key = f.read().encode("utf-8")
+                match = re.search(r'URI="([^"]+)"', line)
+
+                if match:
+                    key_uri = match.group(1)
+
+                else:
+                    raise ValueError("unable.to.get.uri")
+
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(key_uri) as response:
+                        content = await response.read()
+                        key = content
+
     # ===============================================================
 
     total_segment = len(segment_urls)
@@ -282,7 +302,8 @@ async def main():
 
     # store in fail.json file
     with open("fail.json", "w") as f:
-        json.dump(failed_download, f)
+        data_to_save = [asdict(data) for data in failed_download]
+        json.dump(data_to_save, f)
 
     create_segment_file(total_segment)
 
