@@ -6,10 +6,7 @@ import aiohttp
 import json
 import subprocess
 from typing import Any
-
 from pydantic import BaseModel
-from transformer.tranformFytp import TransformFYTPOrMOOF
-from transformer.transformNormal import TransformNormal
 from type import Decode, Segment
 from decoder import (
     DecodeFailList,
@@ -17,13 +14,16 @@ from decoder import (
     Decoder,
     DecodeFullURL,
     DecodePartialURL,
+    DecodeWithInitial,
 )
 from exporter.exporter import Exporter
+from exporter.exportBinary import ExporterBinary
+from exporter.exportJSONFromDataClass import ExportJSONFromDataClass
 from transformer.transformer import Transformer
 from transformer.transformEncryptedData import TransformEncryptedData
 from transformer.transformCleanData import TransformCleanData
-from exporter.exportBinary import ExporterBinary
-from exporter.exportJSONFromDataClass import ExportJSONFromDataClass
+from transformer.tranformFytp import TransformFYTPOrMOOF
+from transformer.transformNormal import TransformNormal
 
 # ===== CONFIG =====
 output_folder = "segments"
@@ -177,7 +177,7 @@ def get_headers() -> Header:
 
 async def main() -> None:
     m3u8_file = "playlist.txt"  # playlist file name
-    extension = "ts"
+    extension = "mp4"
 
     if combine_video:
         run_combine_video()
@@ -186,8 +186,9 @@ async def main() -> None:
 
     headers = get_headers()
 
-    decoder: Decoder = DecodeFullURL(
+    decoder: Decoder = DecodeWithInitial(
         filename=m3u8_file,
+        find="https"
     )
 
     concurrency = Concurrency(10)
@@ -201,7 +202,7 @@ async def main() -> None:
 
     print(f"Total segment {segment_length} found")
 
-    transformer: Transformer = TransformEncryptedData(segment.key)
+    transformer: Transformer = TransformFYTPOrMOOF()
 
     download = DownloadSegment(
         urls=segment.urls,

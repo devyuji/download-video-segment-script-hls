@@ -2,7 +2,7 @@ from exporter.exporter import Exporter
 
 
 class TransformFYTPOrMOOF:
-    def transform(self, data: bytes, exporter: Exporter):
+    def transform(self, data: bytes, exporter: Exporter, index: int = 0):
         try:
             # 1. Search for 'moof' (Media Segment) or 'ftyp' (Init Segment)
             moof_index = data.find(b"moof")
