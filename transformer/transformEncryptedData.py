@@ -6,13 +6,13 @@ class TransformEncryptedData:
     def __init__(self, key: bytes):
         self.key = key
 
-    def transform(self, data: bytes, exporter: Exporter) -> None:
+    def transform(self, data: bytes, exporter: Exporter, index: int = 0) -> None:
         """
         Strips the plaintext HTML disguise and decrypts the AES-128 CBC payload.
 
         :param data: The raw binary downloaded from the .html URL
         """
-        sequence_num = 1
+        sequence_num = index
 
         iv = sequence_num.to_bytes(16, byteorder="big")
 

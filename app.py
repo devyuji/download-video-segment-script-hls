@@ -6,6 +6,8 @@ import aiohttp
 import json
 import subprocess
 from typing import Any
+
+from pydantic import BaseModel
 from transformer.tranformFytp import TransformFYTPOrMOOF
 from transformer.transformNormal import TransformNormal
 from type import Decode, Segment
@@ -47,24 +49,27 @@ class Concurrency:
 class DownloadSegment:
     def __init__(
         self,
+        urls: list[Segment],
         concurrency: Concurrency,
         headers: Header,
+        transformer: Transformer,
         file_extension: str = "ts",
         retry: bool = False,
     ):
+        self.urls = urls
         self.concurrency = concurrency
         self.retry = retry
         self.headers = headers
+        self.transformer = transformer
         self.file_extension = file_extension
+        self.retry = retry
 
     # it return failed download list
-    async def start(
-        self, urls: list[Segment], transformer: Transformer
-    ) -> list[Segment]:
+    async def start(self) -> list[Segment]:
         async with aiohttp.ClientSession() as session:
             tasks = [
-                self._download_segment(session, data.url, data.index, transformer)
-                for data in urls
+                self._download_segment(session, data.url, data.index)
+                for data in self.urls
             ]
 
             rr = await asyncio.gather(*tasks)
@@ -76,7 +81,6 @@ class DownloadSegment:
         session: aiohttp.ClientSession,
         url: str,
         index: int,
-        transformer: Transformer,
     ) -> Segment | None:
         async with self.concurrency.limit:
             try:
@@ -94,7 +98,11 @@ class DownloadSegment:
 
                     content = await response.read()
 
-                    transformer.transform(content, exporter=ExporterBinary(file_path))
+                    self.transformer.transform(
+                        content,
+                        exporter=ExporterBinary(file_path),
+                        index=index,
+                    )
 
             except Exception as e:
                 print(e)
@@ -104,40 +112,6 @@ class DownloadSegment:
                     url=url,
                     index=index,
                 )
-
-
-class Extract:
-    def __init__(self, decoder: Decoder, download: DownloadSegment, exporter: Exporter):
-        self.decoder = decoder
-        self.download = download
-        self.exporter = exporter
-
-    async def run(self) -> None:
-        segment = await self.decoder.decode()
-
-        print(f"Found {len(segment.urls)} segment")
-
-        # TODO: change based on m3u8 file
-        transform: Transformer = TransformCleanData()
-
-        if segment.is_encrypted:
-            transform = TransformEncryptedData(segment.key)
-
-        failed_download = await self.download.start(segment.urls, transform)
-
-        self.exporter.export(
-            Decode(
-                urls=failed_download,
-                is_encrypted=segment.is_encrypted,
-                key=segment.key,
-            )
-        )
-
-        print(f"Total Failed Download: {len(failed_download)}")
-
-        create_segment_file(len(segment.urls), self.download.file_extension)
-
-        print("Download Complete.")
 
 
 # if url are base64 encoded
@@ -196,7 +170,7 @@ def run_combine_video() -> None:
         print("unable to combine video segment.")
 
 
-def get_headers() -> dict[str, Any]:
+def get_headers() -> Header:
     with open("headers.json", "r") as f:
         return json.load(f)
 
@@ -222,15 +196,33 @@ async def main() -> None:
         decoder = DecodeFailList("fail.json")
         concurrency = Concurrency(1)
 
-    service = Extract(
-        decoder=decoder,
-        download=DownloadSegment(
-            concurrency=concurrency, headers=headers, file_extension=extension
-        ),
-        exporter=ExportJSONFromDataClass("fail.json"),
+    segment = await decoder.decode()
+    segment_length = len(segment.urls)
+
+    print(f"Total segment {segment_length} found")
+
+    transformer: Transformer = TransformEncryptedData(segment.key)
+
+    download = DownloadSegment(
+        urls=segment.urls,
+        concurrency=concurrency,
+        headers=headers,
+        transformer=transformer,
+        file_extension=extension,
     )
 
-    await service.run()
+    failed_download = await download.start()
+
+    segment.urls = failed_download
+
+    print(f"Total Failed Download: {len(failed_download)}")
+
+    ExportJSONFromDataClass("fail.json").export(segment)
+
+    if not start_failed:
+        create_segment_file(segment_length, extension)
+
+    print("Download Complete.")
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@ from exporter.exporter import Exporter
 
 
 class TransformCleanData:
-    def transform(self, data: bytes, exporter: Exporter) -> None:
+    def transform(self, data: bytes, exporter: Exporter, index: int = 0) -> None:
         max_length = min(len(data), 2040)
 
         VIDEO_BYTE = 0x47
