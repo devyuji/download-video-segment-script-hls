@@ -145,7 +145,7 @@ class DecodePartialURLWithInitial:
         return Decode(urls=segment_urls, is_encrypted=is_encrypted, key=key)
 
 class DecodeWithInitial:
-    def __init__(self, filename: str, find: str) -> None:
+    def __init__(self, filename: str, find: str = "https") -> None:
         self.filename = filename
         self.find = find
 
@@ -166,17 +166,15 @@ class DecodeWithInitial:
                         segment_urls.append(Segment(url=uri, index=index))
 
                         index += 1
+                    else:
+                        raise ValueError("unable.to.get.url.")
 
-                if line.startswith(self.find):
-                    try:
-                        segment_urls.append(Segment(url=line, index=index))
+                elif line.startswith(self.find):
+                    segment_urls.append(Segment(url=line, index=index))
 
-                        index += 1
-                    except Exception as e:
-                        print(e)
-                        print("Failed to decode:", line)
+                    index += 1
 
-                if line.startswith("#EXT-X-KEY"):
+                elif line.startswith("#EXT-X-KEY"):
                     is_encrypted = True
 
                     match = re.search(r'URI="([^"]+)"', line)

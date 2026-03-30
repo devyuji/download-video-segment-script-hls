@@ -1,7 +1,7 @@
 import os
 
 # --- The Ultimate fMP4 Binary Merger ---
-total_segments = 906
+total_segments = 584
 name = "output.mp4"
 output_folder = "segments"
 extension = "mp4"

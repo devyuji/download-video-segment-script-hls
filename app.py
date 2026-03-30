@@ -5,7 +5,7 @@ import asyncio
 import aiohttp
 import json
 import subprocess
-from typing import Any
+from typing import Any, Callable
 from pydantic import BaseModel
 from type import Decode, Segment
 from decoder import (
@@ -16,7 +16,6 @@ from decoder import (
     DecodePartialURL,
     DecodeWithInitial,
 )
-from exporter.exporter import Exporter
 from exporter.exportBinary import ExporterBinary
 from exporter.exportJSONFromDataClass import ExportJSONFromDataClass
 from transformer.transformer import Transformer
@@ -31,12 +30,6 @@ DOWNLOAD_RETRY = 5
 # ==================
 
 os.makedirs(output_folder, exist_ok=True)
-
-# ==== args list =====
-args = sys.argv
-start_failed = "-f" in args
-combine_video = "-c" in args
-# ====================
 
 type Header = dict[str, Any]
 
@@ -177,7 +170,13 @@ def get_headers() -> Header:
 
 async def main() -> None:
     m3u8_file = "playlist.txt"  # playlist file name
-    extension = "mp4"
+    extension = "ts"
+
+    # ==== args list =====
+    args = sys.argv
+    start_failed = "-f" in args
+    combine_video = "-c" in args
+    # ====================
 
     if combine_video:
         run_combine_video()
@@ -186,10 +185,15 @@ async def main() -> None:
 
     headers = get_headers()
 
-    decoder: Decoder = DecodeWithInitial(
-        filename=m3u8_file,
-        find="https"
-    )
+    # change this depending on m3u8 file
+    decoder: Decoder = DecodeWithInitial(filename=m3u8_file)
+
+    transformer: dict[str, Callable[..., Transformer]] = {
+        "clean_data": TransformCleanData,
+        "encrypted": TransformEncryptedData,  # required segment.key
+        "mp4": TransformFYTPOrMOOF,
+        "normal": TransformNormal,
+    }
 
     concurrency = Concurrency(10)
 
@@ -202,23 +206,23 @@ async def main() -> None:
 
     print(f"Total segment {segment_length} found")
 
-    transformer: Transformer = TransformFYTPOrMOOF()
-
     download = DownloadSegment(
         urls=segment.urls,
         concurrency=concurrency,
         headers=headers,
-        transformer=transformer,
+        transformer=transformer["mp4"](),
         file_extension=extension,
     )
 
     failed_download = await download.start()
 
-    segment.urls = failed_download
-
     print(f"Total Failed Download: {len(failed_download)}")
 
-    ExportJSONFromDataClass("fail.json").export(segment)
+    ExportJSONFromDataClass("fail.json").export(Decode(
+        urls=failed_download,
+        is_encrypted=segment.is_encrypted,
+        key=segment.key,
+    ))
 
     if not start_failed:
         create_segment_file(segment_length, extension)
