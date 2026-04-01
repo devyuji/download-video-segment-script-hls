@@ -15,3 +15,4 @@ try.py
 *.mp4
 vnt.py
 playlist.txt
+headers.json

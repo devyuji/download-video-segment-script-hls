@@ -29,6 +29,12 @@ output_folder = "segments"
 DOWNLOAD_RETRY = 5
 # ==================
 
+# ==== args list =====
+args = sys.argv
+start_failed = "-f" in args
+combine_video = "-c" in args
+# ====================
+
 os.makedirs(output_folder, exist_ok=True)
 
 type Header = dict[str, Any]
@@ -81,7 +87,7 @@ class DownloadSegment:
 
                 await asyncio.sleep(0.2)
                 async with session.get(
-                    url.strip(), headers=self.headers, timeout=aiohttp.ClientTimeout(10)
+                    url.strip(), headers=self.headers, timeout=aiohttp.ClientTimeout(20)
                 ) as response:
                     response.raise_for_status()
 
@@ -169,14 +175,21 @@ def get_headers() -> Header:
 
 
 async def main() -> None:
-    m3u8_file = "playlist.txt"  # playlist file name
-    extension = "ts"
+    transformer: dict[str, Callable[..., Transformer]] = {
+        "clean_data": TransformCleanData,
+        "encrypted": TransformEncryptedData,  # required segment.key
+        "mp4": TransformFYTPOrMOOF,
+        "normal": TransformNormal,
+    }
 
-    # ==== args list =====
-    args = sys.argv
-    start_failed = "-f" in args
-    combine_video = "-c" in args
-    # ====================
+    # -------------------- config --------------------
+
+    m3u8_file = "playlist.txt"  # playlist file name
+    extension = "mp4"  # change this depending on m3u8 file
+    decoder: Decoder = DecodeFullURL(filename=m3u8_file)
+    t = transformer["normal"]()
+
+    # -------------------- config ---------------------
 
     if combine_video:
         run_combine_video()
@@ -184,16 +197,6 @@ async def main() -> None:
         return
 
     headers = get_headers()
-
-    # change this depending on m3u8 file
-    decoder: Decoder = DecodeWithInitial(filename=m3u8_file)
-
-    transformer: dict[str, Callable[..., Transformer]] = {
-        "clean_data": TransformCleanData,
-        "encrypted": TransformEncryptedData,  # required segment.key
-        "mp4": TransformFYTPOrMOOF,
-        "normal": TransformNormal,
-    }
 
     concurrency = Concurrency(10)
 
@@ -210,7 +213,7 @@ async def main() -> None:
         urls=segment.urls,
         concurrency=concurrency,
         headers=headers,
-        transformer=transformer["mp4"](),
+        transformer=t,
         file_extension=extension,
     )
 
@@ -218,11 +221,13 @@ async def main() -> None:
 
     print(f"Total Failed Download: {len(failed_download)}")
 
-    ExportJSONFromDataClass("fail.json").export(Decode(
-        urls=failed_download,
-        is_encrypted=segment.is_encrypted,
-        key=segment.key,
-    ))
+    ExportJSONFromDataClass("fail.json").export(
+        Decode(
+            urls=failed_download,
+            is_encrypted=segment.is_encrypted,
+            key=segment.key,
+        )
+    )
 
     if not start_failed:
         create_segment_file(segment_length, extension)
