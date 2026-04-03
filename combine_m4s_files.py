@@ -1,10 +1,10 @@
 import os
 
 # --- The Ultimate fMP4 Binary Merger ---
-total_segments = 584
-name = "output.mp4"
-output_folder = "segments"
+total_segments = 580
+output_folder = "output/segments-video"
 extension = "mp4"
+name = f"output.{extension}"
 
 print("\n[+] Starting binary merge for fMP4...")
 

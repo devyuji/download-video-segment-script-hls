@@ -24,18 +24,12 @@ from transformer.transformCleanData import TransformCleanData
 from transformer.tranformFytp import TransformFYTPOrMOOF
 from transformer.transformNormal import TransformNormal
 
-# ===== CONFIG =====
-output_folder = "segments"
-DOWNLOAD_RETRY = 5
-# ==================
-
 # ==== args list =====
 args = sys.argv
 start_failed = "-f" in args
 combine_video = "-c" in args
 # ====================
 
-os.makedirs(output_folder, exist_ok=True)
 
 type Header = dict[str, Any]
 
@@ -54,6 +48,7 @@ class DownloadSegment:
         transformer: Transformer,
         file_extension: str = "ts",
         retry: bool = False,
+        output_folder: str = "segments",
     ):
         self.urls = urls
         self.concurrency = concurrency
@@ -62,6 +57,7 @@ class DownloadSegment:
         self.transformer = transformer
         self.file_extension = file_extension
         self.retry = retry
+        self.output_folder = output_folder
 
     # it return failed download list
     async def start(self) -> list[Segment]:
@@ -92,7 +88,7 @@ class DownloadSegment:
                     response.raise_for_status()
 
                     file_path = os.path.join(
-                        output_folder, f"segment_{index}.{self.file_extension}"
+                        self.output_folder, f"segment_{index}.{self.file_extension}"
                     )
 
                     content = await response.read()
@@ -134,7 +130,11 @@ def decode_segment(encoded_part: str) -> str:
     return real_url
 
 
-def create_segment_file(total: int, extension: str = "ts") -> None:
+def create_segment_file(
+    total: int,
+    output_folder: str,
+    extension: str = "ts",
+) -> None:
     segment_file = os.path.join(output_folder, "files.txt")
 
     with open(segment_file, "w") as f:
@@ -142,7 +142,7 @@ def create_segment_file(total: int, extension: str = "ts") -> None:
             f.write(f"file 'segment_{i}.{extension}'\n")
 
 
-def run_combine_video() -> None:
+def run_combine_video(output_folder: str) -> None:
     cmd = [
         "ffmpeg",
         "-f",
@@ -150,7 +150,7 @@ def run_combine_video() -> None:
         "-safe",
         "0",
         "-i",
-        "segments/files.txt",
+        f"{output_folder}/files.txt",
         "-c",
         "copy",
         "output.mp4",
@@ -184,15 +184,19 @@ async def main() -> None:
 
     # -------------------- config --------------------
 
+    output_folder = "output/segments-video"
+    os.makedirs(output_folder, exist_ok=True)
+
     m3u8_file = "playlist.txt"  # playlist file name
-    extension = "mp4"  # change this depending on m3u8 file
-    decoder: Decoder = DecodeFullURL(filename=m3u8_file)
-    t = transformer["normal"]()
+    extension = "mp4"  # change this depending on m3u8_file
+
+    decoder: Decoder = DecodeWithInitial(filename=m3u8_file)
+    t = transformer["mp4"]()
 
     # -------------------- config ---------------------
 
     if combine_video:
-        run_combine_video()
+        run_combine_video(output_folder)
 
         return
 
@@ -215,6 +219,7 @@ async def main() -> None:
         headers=headers,
         transformer=t,
         file_extension=extension,
+        output_folder=output_folder,
     )
 
     failed_download = await download.start()
@@ -230,7 +235,7 @@ async def main() -> None:
     )
 
     if not start_failed:
-        create_segment_file(segment_length, extension)
+        create_segment_file(segment_length, output_folder, extension)
 
     print("Download Complete.")
 
