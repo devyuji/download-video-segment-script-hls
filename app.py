@@ -6,10 +6,11 @@ import aiohttp
 import json
 import subprocess
 from typing import Any, Callable
+from combine_m4s_files import combine_binary_merge
 from type import Decode, Segment
 
-from decoder.decode_failed_list import DecodeFailList
 from decoder.decoder import Decoder
+from decoder.decode_failed_list import DecodeFailList
 from decoder.decode_full_url import DecodeFullURL
 from decoder.decode_full_with_initial import DecodeWithInitial
 from decoder.decode_partial import DecodePartial
@@ -24,11 +25,12 @@ from transformer.transformCleanData import TransformCleanData
 from transformer.tranformFytp import TransformFYTPOrMOOF
 from transformer.transformNormal import TransformNormal
 
-# ==== args list =====
+# =========== args list =============
 args = sys.argv
 start_failed = "-f" in args
 combine_video = "-c" in args
-# ====================
+combine_video_mp4 = "-cc" in args
+# ===================================
 
 
 type Header = dict[str, Any]
@@ -188,15 +190,20 @@ async def main() -> None:
     os.makedirs(output_folder, exist_ok=True)
 
     m3u8_file = "playlist.txt"  # playlist file name
-    extension = "mp4"  # change this depending on m3u8_file
+    extension = "ts"  # change this depending on m3u8_file
 
-    decoder: Decoder = DecodeWithInitial(filename=m3u8_file)
-    t = transformer["mp4"]()
+    decoder: Decoder = DecodeFullURL(filename=m3u8_file)
+    t = transformer["clean_data"]()
 
     # -------------------- config ---------------------
 
     if combine_video:
         run_combine_video(output_folder)
+
+        return
+
+    if combine_video_mp4:
+        combine_binary_merge(100, output_folder, extension)
 
         return
 

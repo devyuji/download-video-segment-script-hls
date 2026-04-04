@@ -8,6 +8,8 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Custom
 EXTM3U.txt
 segments/
 fail.json
@@ -17,3 +19,4 @@ vnt.py
 playlist.txt
 headers.json
 output/
+*.txt

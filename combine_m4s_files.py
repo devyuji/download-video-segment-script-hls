@@ -1,40 +1,39 @@
 import os
 
+
 # --- The Ultimate fMP4 Binary Merger ---
-total_segments = 580
-output_folder = "output/segments-video"
-extension = "mp4"
-name = f"output.{extension}"
+def combine_binary_merge(total: int, output_folder: str, extension: str) -> None:
+    print("\n[+] Starting binary merge for fMP4...")
 
-print("\n[+] Starting binary merge for fMP4...")
+    name = f"output.{extension}"
 
-final_output = os.path.join(output_folder, name)
+    final_output = os.path.join(output_folder, name)
 
-# Open the final master file in "wb" (write binary) mode
-with open(final_output, "wb") as master_file:
-    # 1. Write the Init Segment first (This gives the file its SPS/PPS headers)
-    init_file = os.path.join(output_folder, "segment_0.mp4")
+    # Open the final master file in "wb" (write binary) mode
+    with open(final_output, "wb") as master_file:
+        # 1. Write the Init Segment first (This gives the file its SPS/PPS headers)
+        init_file = os.path.join(output_folder, f"segment_0.{extension}")
 
-    if os.path.exists(init_file):
-        with open(init_file, "rb") as f:
-            master_file.write(f.read())
-        print(f"    -> Added {init_file}")
-    else:
-        print(
-            f"[-] ERROR: Could not find {init_file}! The video will not play without it."
-        )
-
-    # 2. Loop through all 100 segments and append their raw bytes
-    for i in range(1, total_segments + 1):
-        segment_file = os.path.join(output_folder, f"segment_{i}.{extension}")
-
-        if os.path.exists(segment_file):
-            with open(segment_file, "rb") as f:
+        if os.path.exists(init_file):
+            with open(init_file, "rb") as f:
                 master_file.write(f.read())
-            # Optional: Print every 10th segment so you know it's working
-            if i % 10 == 0:
-                print(f"    -> Added up to {segment_file}...")
+            print(f"    -> Added {init_file}")
         else:
-            print(f"[-] WARNING: Missing {segment_file}. Video might glitch here.")
+            print(
+                f"[-] ERROR: Could not find {init_file}! The video will not play without it."
+            )
 
-print(f"\n[+] Success! All files merged into {final_output}")
+        # 2. Loop through all 100 segments and append their raw bytes
+        for i in range(1, total + 1):
+            segment_file = os.path.join(output_folder, f"segment_{i}.{extension}")
+
+            if os.path.exists(segment_file):
+                with open(segment_file, "rb") as f:
+                    master_file.write(f.read())
+                # Optional: Print every 10th segment so you know it's working
+                if i % 10 == 0:
+                    print(f"    -> Added up to {segment_file}...")
+            else:
+                print(f"[-] WARNING: Missing {segment_file}. Video might glitch here.")
+
+    print(f"\n[+] Success! All files merged into {final_output}")
