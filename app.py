@@ -3,6 +3,7 @@ import base64
 import os
 import asyncio
 import aiohttp
+from curl_cffi import AsyncSession, Response, requests
 import json
 import subprocess
 from typing import Any, Callable
@@ -37,7 +38,7 @@ type Header = dict[str, Any]
 
 
 class Concurrency:
-    def __init__(self, number: int):
+    def __init__(self, number: int = 10):
         self.limit = asyncio.Semaphore(number)
 
 
@@ -61,7 +62,73 @@ class DownloadSegment:
         self.retry = retry
         self.output_folder = output_folder
 
-    # it return failed download list
+
+class DownloadWithSpoof(DownloadSegment):
+    async def start(self) -> list[Segment]:
+        async with requests.AsyncSession(
+            impersonate="firefox147", timeout=100
+        ) as session:
+            tasks = [
+                self._download_segment(session, data.url, data.index)
+                for data in self.urls
+            ]
+
+            rr = await asyncio.gather(*tasks)
+
+        return [item for item in rr if item is not None]
+
+    async def _download_segment(
+        self,
+        session: AsyncSession[Response],
+        url: str,
+        index: int,
+    ) -> Segment | None:
+
+        count_retry = 1
+        async with self.concurrency.limit:
+            while True:
+                try:
+                    print(
+                        f"Downloading segment_{index}.{self.file_extension} - {count_retry}"
+                    )
+
+                    await asyncio.sleep(0.2)
+                    response = await session.get(url.strip())
+                    response.raise_for_status()
+
+                    file_path = os.path.join(
+                        self.output_folder, f"segment_{index}.{self.file_extension}"
+                    )
+
+                    content = response.content
+
+                    self.transformer.transform(
+                        content,
+                        exporter=ExporterBinary(file_path),
+                        index=index,
+                    )
+                    break
+
+                except Exception as e:
+                    print(e)
+                    print(f"Failed to download {index} - {url}")
+
+                    if not (self.retry):
+                        return Segment(
+                            url=url,
+                            index=index,
+                        )
+
+                    if count_retry >= 10:
+                        return Segment(
+                            url=url,
+                            index=index,
+                        )
+
+                    count_retry += 1
+
+
+class DownloadNormal(DownloadSegment):
     async def start(self) -> list[Segment]:
         async with aiohttp.ClientSession() as session:
             tasks = [
@@ -79,36 +146,53 @@ class DownloadSegment:
         url: str,
         index: int,
     ) -> Segment | None:
+        count_retry = 1
+
         async with self.concurrency.limit:
-            try:
-                print(f"Downloading segment_{index}.{self.file_extension}")
-
-                await asyncio.sleep(0.2)
-                async with session.get(
-                    url.strip(), headers=self.headers, timeout=aiohttp.ClientTimeout(20)
-                ) as response:
-                    response.raise_for_status()
-
-                    file_path = os.path.join(
-                        self.output_folder, f"segment_{index}.{self.file_extension}"
+            while True:
+                try:
+                    print(
+                        f"Downloading segment_{index}.{self.file_extension} - {count_retry}"
                     )
 
-                    content = await response.read()
+                    await asyncio.sleep(0.2)
+                    async with session.get(
+                        url.strip(),
+                        headers=self.headers,
+                        timeout=aiohttp.ClientTimeout(20),
+                    ) as response:
+                        response.raise_for_status()
 
-                    self.transformer.transform(
-                        content,
-                        exporter=ExporterBinary(file_path),
-                        index=index,
-                    )
+                        file_path = os.path.join(
+                            self.output_folder, f"segment_{index}.{self.file_extension}"
+                        )
 
-            except Exception as e:
-                print(e)
-                print(f"Failed to download {index} - {url}")
+                        content = await response.read()
 
-                return Segment(
-                    url=url,
-                    index=index,
-                )
+                        self.transformer.transform(
+                            content,
+                            exporter=ExporterBinary(file_path),
+                            index=index,
+                        )
+                    break
+
+                except Exception as e:
+                    print(e)
+                    print(f"Failed to download {index} - {url}")
+
+                    if not (self.retry):
+                        return Segment(
+                            url=url,
+                            index=index,
+                        )
+
+                    if count_retry >= 10:
+                        return Segment(
+                            url=url,
+                            index=index,
+                        )
+
+                    count_retry += 1
 
 
 # if url are base64 encoded
@@ -194,6 +278,7 @@ async def main() -> None:
 
     decoder: Decoder = DecodeFullURL(filename=m3u8_file)
     t = transformer["clean_data"]()
+    concurrency = Concurrency(10)
 
     # -------------------- config ---------------------
 
@@ -209,8 +294,6 @@ async def main() -> None:
 
     headers = get_headers()
 
-    concurrency = Concurrency(10)
-
     if start_failed:
         decoder = DecodeFailList("fail.json")
         concurrency = Concurrency(1)
@@ -220,13 +303,14 @@ async def main() -> None:
 
     print(f"Total segment {segment_length} found")
 
-    download = DownloadSegment(
+    download = DownloadWithSpoof(
         urls=segment.urls,
         concurrency=concurrency,
         headers=headers,
         transformer=t,
         file_extension=extension,
         output_folder=output_folder,
+        retry=start_failed,
     )
 
     failed_download = await download.start()
