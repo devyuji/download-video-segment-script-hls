@@ -27,7 +27,7 @@ Change this depending on m3u8 file.
 
 `ffmpeg -f concat -safe 0 -i files.txt -c copy output.mp4`
 
-### For m4s file run this command
+### For m4s/mp4 file run this command
 
 `uv run combine_m4s_files.py`
 

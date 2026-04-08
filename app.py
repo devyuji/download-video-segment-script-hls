@@ -159,7 +159,7 @@ class DownloadNormal(DownloadSegment):
                     async with session.get(
                         url.strip(),
                         headers=self.headers,
-                        timeout=aiohttp.ClientTimeout(20),
+                        timeout=aiohttp.ClientTimeout(100),
                     ) as response:
                         response.raise_for_status()
 
@@ -247,12 +247,7 @@ def run_combine_video(output_folder: str) -> None:
         for line in process.stdout:
             print(line.strip())
 
-    return_code = process.wait()
-
-    if return_code == 0:
-        print("video segment combined successfully.")
-    else:
-        print("unable to combine video segment.")
+    process.wait()
 
 
 def get_headers() -> Header:
