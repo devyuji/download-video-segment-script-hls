@@ -256,7 +256,7 @@ def get_headers() -> Header:
 
 
 async def main() -> None:
-    transformer: dict[str, Callable[..., Transformer]] = {
+    transformer: dict[str, type[Transformer]] = {
         "clean_data": TransformCleanData,
         "encrypted": TransformEncryptedData,  # required segment.key
         "mp4": TransformFYTPOrMOOF,
@@ -272,7 +272,6 @@ async def main() -> None:
     extension = "ts"  # change this depending on m3u8_file
 
     decoder: Decoder = DecodeFullURL(filename=m3u8_file)
-    t = transformer["clean_data"]()
     concurrency = Concurrency(10)
 
     # -------------------- config ---------------------
@@ -296,6 +295,8 @@ async def main() -> None:
     segment = await decoder.decode()
     segment_length = len(segment.urls)
 
+    t = transformer["clean_data"]()  # type: ignore
+
     print(f"Total segment {segment_length} found")
 
     download = DownloadWithSpoof(
@@ -305,7 +306,7 @@ async def main() -> None:
         transformer=t,
         file_extension=extension,
         output_folder=output_folder,
-        retry=start_failed,
+        retry=False,
     )
 
     failed_download = await download.start()

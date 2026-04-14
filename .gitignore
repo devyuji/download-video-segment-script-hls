@@ -20,3 +20,5 @@ playlist.txt
 headers.json
 output/
 *.txt
+test.py
+*.html

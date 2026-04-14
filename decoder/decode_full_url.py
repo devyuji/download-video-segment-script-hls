@@ -40,6 +40,6 @@ class DecodeFullURL:
                                 key = content
 
                     else:
-                        raise ValueError("unable.to.get.uri")
+                        raise ValueError("unable.to.get.key")
 
         return Decode(urls=segment_urls, is_encrypted=is_encrypted, key=key)
