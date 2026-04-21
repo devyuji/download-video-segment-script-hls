@@ -6,7 +6,7 @@ import aiohttp
 from curl_cffi import AsyncSession, Response, requests
 import json
 import subprocess
-from typing import Any, Callable
+from typing import Any
 from combine_m4s_files import combine_binary_merge
 from type import Decode, Segment
 
@@ -256,12 +256,12 @@ def get_headers() -> Header:
 
 
 async def main() -> None:
-    transformer: dict[str, type[Transformer]] = {
-        "clean_data": TransformCleanData,
-        "encrypted": TransformEncryptedData,  # required segment.key
-        "mp4": TransformFYTPOrMOOF,
-        "normal": TransformNormal,
-    }
+    # transformer: dict[str, type[Transformer]] = {
+    #     "clean_data": TransformCleanData,
+    #     "encrypted": TransformEncryptedData,  # required segment.key
+    #     "mp4": TransformFYTPOrMOOF,
+    #     "normal": TransformNormal,
+    # }
 
     # -------------------- config --------------------
 
@@ -273,6 +273,7 @@ async def main() -> None:
 
     decoder: Decoder = DecodeFullURL(filename=m3u8_file)
     concurrency = Concurrency(10)
+    retry = False
 
     # -------------------- config ---------------------
 
@@ -290,12 +291,15 @@ async def main() -> None:
 
     if start_failed:
         decoder = DecodeFailList("fail.json")
-        concurrency = Concurrency(1)
+        concurrency = Concurrency(2)
+        retry = True
 
     segment = await decoder.decode()
     segment_length = len(segment.urls)
 
-    t = transformer["clean_data"]()  # type: ignore
+    # ------------------- change this based on m3u8 file --------------------------
+    t = TransformCleanData()
+    # -----------------------------------------------------------------------------
 
     print(f"Total segment {segment_length} found")
 
@@ -306,7 +310,7 @@ async def main() -> None:
         transformer=t,
         file_extension=extension,
         output_folder=output_folder,
-        retry=False,
+        retry=retry,
     )
 
     failed_download = await download.start()
