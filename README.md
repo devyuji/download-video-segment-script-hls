@@ -29,6 +29,6 @@ Change this depending on m3u8 file.
 
 ### For m4s/mp4 file run this command
 
-`uv run combine_m4s_files.py`
+`uv run app.py -cc`
 
 ** Change total_segment from file based on total number of files in segment folder. **
