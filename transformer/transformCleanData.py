@@ -5,6 +5,8 @@ class TransformCleanData:
     def transform(self, data: bytes, exporter: Exporter, index: int = 0) -> None:
         max_length = min(len(data), 2040)
 
+        found = False
+
         VIDEO_BYTE = 0x47
 
         for i in range(max_length):
@@ -16,10 +18,14 @@ class TransformCleanData:
                     and data[i + 376] == VIDEO_BYTE
                 ):
                     # Slice the bytes object to drop the fake header
-                    print("Found clear data.")
+                    print(f"Found clear data - {index}")
 
                     cleaned_data = data[i:]
 
                     exporter.export(cleaned_data)
+                    found = True
 
                     break
+
+        if not found:
+            raise ValueError(f"Cleared data not found - {index}")

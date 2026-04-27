@@ -65,8 +65,11 @@ class DownloadSegment:
 
 class DownloadWithSpoof(DownloadSegment):
     async def start(self) -> list[Segment]:
+
         async with requests.AsyncSession(
-            impersonate="firefox147", timeout=100
+            impersonate="firefox147",
+            timeout=100,
+            headers=self.headers,
         ) as session:
             tasks = [
                 self._download_segment(session, data.url, data.index)
@@ -160,6 +163,7 @@ class DownloadNormal(DownloadSegment):
                         url.strip(),
                         headers=self.headers,
                         timeout=aiohttp.ClientTimeout(100),
+                        allow_redirects=True,
                     ) as response:
                         response.raise_for_status()
 
@@ -256,13 +260,6 @@ def get_headers() -> Header:
 
 
 async def main() -> None:
-    # transformer: dict[str, type[Transformer]] = {
-    #     "clean_data": TransformCleanData,
-    #     "encrypted": TransformEncryptedData,  # required segment.key
-    #     "mp4": TransformFYTPOrMOOF,
-    #     "normal": TransformNormal,
-    # }
-
     # -------------------- config --------------------
 
     output_folder = "output/segments-video"
@@ -291,8 +288,8 @@ async def main() -> None:
 
     if start_failed:
         decoder = DecodeFailList("fail.json")
-        concurrency = Concurrency(2)
-        retry = True
+        concurrency = Concurrency(1)
+        retry = False
 
     segment = await decoder.decode()
     segment_length = len(segment.urls)
@@ -317,7 +314,7 @@ async def main() -> None:
 
     print(f"Total Failed Download: {len(failed_download)}")
 
-    ExportJSONFromDataClass("fail.json").export(
+    ExportJSONFromDataClass(filename="fail.json").export(
         Decode(
             urls=failed_download,
             is_encrypted=segment.is_encrypted,
