@@ -1,5 +1,4 @@
 import re
-
 import aiohttp
 
 from type import Decode, Segment
@@ -18,13 +17,9 @@ class DecodeFullURL:
             index = 0
             for line in f:
                 if line.startswith("https"):
-                    try:
-                        segment_urls.append(Segment(url=line, index=index))
+                    segment_urls.append(Segment(url=line, index=index))
 
-                        index += 1
-                    except Exception as e:
-                        print(e)
-                        print("Failed to decode:", line)
+                    index += 1
 
                 if line.startswith("#EXT-X-KEY"):
                     is_encrypted = True

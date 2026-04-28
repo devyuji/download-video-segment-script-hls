@@ -28,4 +28,4 @@ class TransformCleanData:
                     break
 
         if not found:
-            raise ValueError(f"Cleared data not found - {index}")
+            raise ValueError(f"cleared.data.not.found - {index}")

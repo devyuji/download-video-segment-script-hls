@@ -1,4 +1,3 @@
-import sys
 import base64
 import os
 import asyncio
@@ -7,9 +6,12 @@ from curl_cffi import AsyncSession, Response, requests
 import json
 import subprocess
 from typing import Any
-from combine_m4s_files import combine_binary_merge
 from type import Decode, Segment
+import click
 
+from combine_m4s_files import combine_binary_merge
+
+from decoder.decode_with_url import DecodeWithURL
 from decoder.decoder import Decoder
 from decoder.decode_failed_list import DecodeFailList
 from decoder.decode_full_url import DecodeFullURL
@@ -27,10 +29,10 @@ from transformer.tranformFytp import TransformFYTPOrMOOF
 from transformer.transformNormal import TransformNormal
 
 # =========== args list =============
-args = sys.argv
-start_failed = "-f" in args
-combine_video = "-c" in args
-combine_video_mp4 = "-cc" in args
+# args = sys.argv
+# start_failed = "-f" in args
+# combine_video = "-c" in args
+# combine_video_mp4 = "-cc" in args
 # ===================================
 
 
@@ -259,7 +261,16 @@ def get_headers() -> Header:
         return json.load(f)
 
 
-async def main() -> None:
+async def main(
+    url: str,
+    decode: str,
+    fail_download: bool,
+    combine_ts: bool,
+    base_url: str,
+    find: str,
+) -> None:
+
+    decoder: Decoder
     # -------------------- config --------------------
 
     output_folder = "output/segments-video"
@@ -268,28 +279,64 @@ async def main() -> None:
     m3u8_file = "playlist.txt"  # playlist file name
     extension = "ts"  # change this depending on m3u8_file
 
-    decoder: Decoder = DecodeFullURL(filename=m3u8_file)
     concurrency = Concurrency(10)
     retry = False
 
     # -------------------- config ---------------------
 
-    if combine_video:
+    if combine_ts:
         run_combine_video(output_folder)
 
         return
 
-    if combine_video_mp4:
-        combine_binary_merge(100, output_folder, extension)
+    # if combine_video_mp4:
+    #     combine_binary_merge(output_folder, extension)
 
-        return
+    #     return
 
     headers = get_headers()
 
-    if start_failed:
-        decoder = DecodeFailList("fail.json")
-        concurrency = Concurrency(1)
-        retry = False
+    if len(url.strip()) > 1:
+        decode = "url"
+
+    if fail_download:
+        decode = "fail"
+
+    # check for which decode to use
+    match decode:
+        case "fu":
+            decoder = DecodeFullURL(filename=m3u8_file)
+
+        case "fwi":
+            decoder = DecodeWithInitial(filename=m3u8_file)
+
+        case "pi":
+            if len(base_url) < 1 or len(find) < 1:
+                click.echo("Base url and find is required")
+                return
+
+            decoder = DecodePartialURLWithInitial(
+                filename=m3u8_file, base=base_url, find=find
+            )
+
+        case "p":
+            if len(base_url) < 1 or len(find) < 1:
+                click.echo("Base url and find is required")
+                return
+
+            decoder = DecodePartial(filename=m3u8_file, base=base_url, find=find)
+
+        case "url":
+            decoder = DecodeWithURL(url=url, headers=headers, filename=m3u8_file)
+
+        case "fail":
+            decoder = DecodeFailList("fail.json")
+            concurrency = Concurrency(1)
+            retry = True
+
+        case _:
+            click.echo("Invalid decode")
+            return
 
     segment = await decoder.decode()
     segment_length = len(segment.urls)
@@ -298,7 +345,7 @@ async def main() -> None:
     t = TransformCleanData()
     # -----------------------------------------------------------------------------
 
-    print(f"Total segment {segment_length} found")
+    click.echo(f"Total segment {segment_length} found")
 
     download = DownloadWithSpoof(
         urls=segment.urls,
@@ -312,7 +359,7 @@ async def main() -> None:
 
     failed_download = await download.start()
 
-    print(f"Total Failed Download: {len(failed_download)}")
+    click.echo(f"Total Failed Download: {len(failed_download)}")
 
     ExportJSONFromDataClass(filename="fail.json").export(
         Decode(
@@ -322,11 +369,35 @@ async def main() -> None:
         )
     )
 
-    if not start_failed:
+    if not fail_download:
         create_segment_file(segment_length, output_folder, extension)
 
-    print("Download Complete.")
+    click.echo("Download Complete.")
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
+@click.command()
+@click.option("--decode", "decode", type=str, default="fu")
+@click.option("-d", "decode", type=str, default="fu")
+@click.option("--base", "base_url", type=str, default="")
+@click.option("--find", "find", type=str, default="")
+@click.option("--fail-download", "fail_download", is_flag=True)
+@click.option("--combine-ts", "combine_ts", is_flag=True)
+@click.argument("url", type=str, default="")
+def run_main(
+    url: str,
+    decode: str,
+    fail_download: bool,
+    combine_ts: bool,
+    base_url: str,
+    find: str,
+) -> None:
+    asyncio.run(
+        main(
+            url,
+            decode=decode,
+            fail_download=fail_download,
+            combine_ts=combine_ts,
+            find=find,
+            base_url=base_url,
+        )
+    )

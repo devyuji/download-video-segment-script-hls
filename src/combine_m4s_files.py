@@ -1,9 +1,14 @@
 import os
 
 
+def _find_number_of_video(foldername: str) -> int: ...
+
+
 # --- The Ultimate fMP4 Binary Merger ---
-def combine_binary_merge(total: int, output_folder: str, extension: str) -> None:
+def combine_binary_merge(output_folder: str, extension: str = "mp4") -> None:
     print("\n[+] Starting binary merge for fMP4...")
+
+    total = _find_number_of_video(output_folder)
 
     name = f"output.{extension}"
 
