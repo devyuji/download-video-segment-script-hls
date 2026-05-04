@@ -1,12 +1,12 @@
 import aiohttp
 
 from decoder.decode_full_url import DecodeFullURL
-from type import Decode
+from type import Decode, Header
 import click
 
 
 class DecodeWithURL:
-    def __init__(self, url: str, headers: dict[str, str], filename: str) -> None:
+    def __init__(self, url: str, headers: Header, filename: str) -> None:
         self.url = url
         self.headers = headers
         self.filename = filename

@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.scripts]
-vd = "app:run_main"
+vd = "app:cli"
 
 [dependency-groups]
 dev = [

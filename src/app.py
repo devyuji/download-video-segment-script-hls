@@ -5,8 +5,7 @@ import aiohttp
 from curl_cffi import AsyncSession, Response, requests
 import json
 import subprocess
-from typing import Any
-from type import Decode, Segment
+from type import Decode, Segment, Header
 import click
 
 from combine_m4s_files import combine_binary_merge
@@ -27,16 +26,6 @@ from transformer.transformEncryptedData import TransformEncryptedData
 from transformer.transformCleanData import TransformCleanData
 from transformer.tranformFytp import TransformFYTPOrMOOF
 from transformer.transformNormal import TransformNormal
-
-# =========== args list =============
-# args = sys.argv
-# start_failed = "-f" in args
-# combine_video = "-c" in args
-# combine_video_mp4 = "-cc" in args
-# ===================================
-
-
-type Header = dict[str, Any]
 
 
 class Concurrency:
@@ -70,7 +59,7 @@ class DownloadWithSpoof(DownloadSegment):
 
         async with requests.AsyncSession(
             impersonate="firefox147",
-            timeout=100,
+            timeout=5 * 60,
             headers=self.headers,
         ) as session:
             tasks = [
@@ -264,7 +253,6 @@ def get_headers() -> Header:
 async def main(
     url: str,
     decode: str,
-    fail_download: bool,
     combine_ts: bool,
     base_url: str,
     find: str,
@@ -299,8 +287,7 @@ async def main(
     if len(url.strip()) > 1:
         decode = "url"
 
-    if fail_download:
-        decode = "fail"
+    fail_download = decode == "fail"
 
     # check for which decode to use
     match decode:
@@ -375,29 +362,56 @@ async def main(
     click.echo("Download Complete.")
 
 
-@click.command()
+@click.group(invoke_without_command=True)
 @click.option("--decode", "decode", type=str, default="fu")
 @click.option("-d", "decode", type=str, default="fu")
 @click.option("--base", "base_url", type=str, default="")
 @click.option("--find", "find", type=str, default="")
-@click.option("--fail-download", "fail_download", is_flag=True)
 @click.option("--combine-ts", "combine_ts", is_flag=True)
-@click.argument("url", type=str, default="")
-def run_main(
+@click.argument("url", "url", type=str, default="")
+@click.pass_context
+def cli(
+    ctx,
     url: str,
     decode: str,
-    fail_download: bool,
     combine_ts: bool,
     base_url: str,
     find: str,
 ) -> None:
-    asyncio.run(
-        main(
-            url,
-            decode=decode,
-            fail_download=fail_download,
-            combine_ts=combine_ts,
-            find=find,
-            base_url=base_url,
+    if ctx.invoked_subcommand is None:
+        asyncio.run(
+            main(
+                url,
+                decode=decode,
+                combine_ts=combine_ts,
+                find=find,
+                base_url=base_url,
+            )
         )
-    )
+
+
+@cli.command()
+@click.argument("url", type=str, required=True)
+def paste(url: str) -> None:
+    asyncio.run(async_paste(url))
+
+
+async def async_paste(url: str) -> None:
+    try:
+        uri = url.strip()
+        headers = get_headers()
+
+        click.echo("Fetching playlist.txt...")
+        async with aiohttp.ClientSession() as session:
+            async with session.get(uri, headers=headers) as response:
+                response.raise_for_status()
+
+                p = await response.text()
+
+                with open("playlist.txt", "w") as f:
+                    f.write(p)
+
+                click.echo("Successfully saved to playlist.txt file")
+
+    except Exception as err:
+        print(err)
