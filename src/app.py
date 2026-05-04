@@ -368,7 +368,8 @@ async def main(
 @click.option("--base", "base_url", type=str, default="")
 @click.option("--find", "find", type=str, default="")
 @click.option("--combine-ts", "combine_ts", is_flag=True)
-@click.argument("url", "url", type=str, default="")
+@click.option("--url", "url", type=str, default="")
+@click.option("-u", "url", type=str, default="")
 @click.pass_context
 def cli(
     ctx,
