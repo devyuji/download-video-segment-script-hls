@@ -16,13 +16,15 @@ Change this depending on m3u8 file.
 
 ## Types of decoder
 
-- "fu" -> The playlist file in which all the url are present.
+- "full" -> The playlist file in which all the url are present.
 
 - "fwi" -> The playlist file in which initial url is present.
 
 - "p" -> The playlist file in which partial url is present.
 
 - "pi" -> The playlist file in which partial url is present with initial (#EXT-INITIAL-URI=).
+
+- "fail" -> To download failed list
 
 When running the script default decoder is "fu" you can change them by providing --decode <type>
 
@@ -33,9 +35,6 @@ When running the script default decoder is "fu" you can change them by providing
 `uv pip install -e .`
 
 `uv run vd`
-
-- if failed list is present then run
-  `uv run vd --fail-download`
 
 ## Once the segment is loaded run this ffmpeg command (works for Transport Stream)
 

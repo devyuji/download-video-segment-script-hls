@@ -59,7 +59,7 @@ class DownloadWithSpoof(DownloadSegment):
 
         async with requests.AsyncSession(
             impersonate="firefox147",
-            timeout=5 * 60,
+            timeout=10 * 60,
             headers=self.headers,
         ) as session:
             tasks = [
@@ -291,7 +291,7 @@ async def main(
 
     # check for which decode to use
     match decode:
-        case "fu":
+        case "full":
             decoder = DecodeFullURL(filename=m3u8_file)
 
         case "fwi":
@@ -363,8 +363,8 @@ async def main(
 
 
 @click.group(invoke_without_command=True)
-@click.option("--decode", "decode", type=str, default="fu")
-@click.option("-d", "decode", type=str, default="fu")
+@click.option("--decode", "decode", type=str, default="full")
+@click.option("-d", "decode", type=str, default="full")
 @click.option("--base", "base_url", type=str, default="")
 @click.option("--find", "find", type=str, default="")
 @click.option("--combine-ts", "combine_ts", is_flag=True)
