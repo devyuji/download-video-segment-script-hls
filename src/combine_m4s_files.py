@@ -1,7 +1,8 @@
 import os
 
 
-def _find_number_of_video(foldername: str) -> int: ...
+def _find_number_of_video(foldername: str) -> int:
+    return 783
 
 
 # --- The Ultimate fMP4 Binary Merger ---
@@ -42,3 +43,7 @@ def combine_binary_merge(output_folder: str, extension: str = "mp4") -> None:
                 print(f"[-] WARNING: Missing {segment_file}. Video might glitch here.")
 
     print(f"\n[+] Success! All files merged into {final_output}")
+
+
+if __name__ == "__main__":
+    combine_binary_merge("output/segments-video/")

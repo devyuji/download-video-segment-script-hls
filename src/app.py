@@ -1,4 +1,3 @@
-import base64
 import os
 import asyncio
 import aiohttp
@@ -7,23 +6,24 @@ import json
 import subprocess
 from type import Decode, Segment, Header
 import click
+from urllib.parse import urlparse
 
-from combine_m4s_files import combine_binary_merge
+# from combine_m4s_files import combine_binary_merge
 
-from decoder.decode_with_url import DecodeWithURL
 from decoder.decoder import Decoder
+from decoder.decode_playlist import DecodePlaylist
 from decoder.decode_failed_list import DecodeFailList
-from decoder.decode_full_url import DecodeFullURL
-from decoder.decode_full_with_initial import DecodeWithInitial
-from decoder.decode_partial import DecodePartial
-from decoder.decode_partial_initial import DecodePartialURLWithInitial
-
+# from decoder.decode_full_url import DecodeFullURL
+# from decoder.decode_full_with_initial import DecodeWithInitial
+# from decoder.decode_partial import DecodePartial
+# from decoder.decode_partial_initial import DecodePartialURLWithInitial
 
 from exporter.exportBinary import ExporterBinary
 from exporter.exportJSONFromDataClass import ExportJSONFromDataClass
+
 from transformer.transformer import Transformer
-from transformer.transformEncryptedData import TransformEncryptedData
 from transformer.transformCleanData import TransformCleanData
+from transformer.transformEncryptedData import TransformEncryptedData
 from transformer.tranformFytp import TransformFYTPOrMOOF
 from transformer.transformNormal import TransformNormal
 
@@ -60,7 +60,6 @@ class DownloadWithSpoof(DownloadSegment):
         async with requests.AsyncSession(
             impersonate="firefox147",
             timeout=10 * 60,
-            headers=self.headers,
         ) as session:
             tasks = [
                 self._download_segment(session, data.url, data.index)
@@ -82,12 +81,14 @@ class DownloadWithSpoof(DownloadSegment):
         async with self.concurrency.limit:
             while True:
                 try:
-                    print(
+                    click.echo(
                         f"Downloading segment_{index}.{self.file_extension} - {count_retry}"
                     )
 
+                    h = self.headers | create_header_based_on_url(url)
+
                     await asyncio.sleep(0.2)
-                    response = await session.get(url.strip())
+                    response = await session.get(url=url, headers=h)
                     response.raise_for_status()
 
                     file_path = os.path.join(
@@ -150,9 +151,12 @@ class DownloadNormal(DownloadSegment):
                     )
 
                     await asyncio.sleep(0.2)
+
+                    h = self.headers | create_header_based_on_url(url)
+
                     async with session.get(
-                        url.strip(),
-                        headers=self.headers,
+                        url,
+                        headers=h,
                         timeout=aiohttp.ClientTimeout(100),
                         allow_redirects=True,
                     ) as response:
@@ -188,27 +192,6 @@ class DownloadNormal(DownloadSegment):
                         )
 
                     count_retry += 1
-
-
-# if url are base64 encoded
-def decode_segment(encoded_part: str) -> str:
-    """
-    Extract and decode base64 string from /p/<base64>.ext
-    """
-    encoded_part = encoded_part.strip()
-
-    # remove "/p/"
-    encoded_part = encoded_part.split("/p/")[1]
-
-    # remove file extension (.js, .vtt, etc.)
-    encoded_part = encoded_part.split(".")[0]
-
-    decoded = base64.b64decode(encoded_part).decode("utf-8")
-
-    # only take the actual media URL (before |)
-    real_url = decoded.split("|")[0]
-
-    return real_url
 
 
 def create_segment_file(
@@ -250,12 +233,18 @@ def get_headers() -> Header:
         return json.load(f)
 
 
+def create_header_based_on_url(url: str) -> Header:
+    parsed = urlparse(url)
+    base_url = f"{parsed.netloc}"
+    return {"Host": base_url}
+
+
 async def main(
-    url: str,
     decode: str,
     combine_ts: bool,
     base_url: str,
     find: str,
+    concurrency: int,
 ) -> None:
 
     decoder: Decoder
@@ -267,7 +256,7 @@ async def main(
     m3u8_file = "playlist.txt"  # playlist file name
     extension = "ts"  # change this depending on m3u8_file
 
-    concurrency = Concurrency(10)
+    concurrency = Concurrency(concurrency)
     retry = False
 
     # -------------------- config ---------------------
@@ -284,46 +273,16 @@ async def main(
 
     headers = get_headers()
 
-    if len(url.strip()) > 1:
-        decode = "url"
-
     fail_download = decode == "fail"
 
     # check for which decode to use
     match decode:
-        case "full":
-            decoder = DecodeFullURL(filename=m3u8_file)
-
-        case "fwi":
-            decoder = DecodeWithInitial(filename=m3u8_file)
-
-        case "pi":
-            if len(base_url) < 1 or len(find) < 1:
-                click.echo("Base url and find is required")
-                return
-
-            decoder = DecodePartialURLWithInitial(
-                filename=m3u8_file, base=base_url, find=find
-            )
-
-        case "p":
-            if len(base_url) < 1 or len(find) < 1:
-                click.echo("Base url and find is required")
-                return
-
-            decoder = DecodePartial(filename=m3u8_file, base=base_url, find=find)
-
-        case "url":
-            decoder = DecodeWithURL(url=url, headers=headers, filename=m3u8_file)
-
         case "fail":
             decoder = DecodeFailList("fail.json")
-            concurrency = Concurrency(1)
             retry = True
 
         case _:
-            click.echo("Invalid decode")
-            return
+            decoder = DecodePlaylist(filename=m3u8_file, base=base_url, find=find)
 
     segment = await decoder.decode()
     segment_length = len(segment.urls)
@@ -363,30 +322,34 @@ async def main(
 
 
 @click.group(invoke_without_command=True)
-@click.option("--decode", "decode", type=str, default="full")
-@click.option("-d", "decode", type=str, default="full")
+@click.option("--decode", "decode", type=str, default="")
+@click.option("-d", "decode", type=str, default="")
 @click.option("--base", "base_url", type=str, default="")
 @click.option("--find", "find", type=str, default="")
 @click.option("--combine-ts", "combine_ts", is_flag=True)
-@click.option("--url", "url", type=str, default="")
-@click.option("-u", "url", type=str, default="")
+@click.option(
+    "-x",
+    "concurrency",
+    type=int,
+    default=10,
+)
 @click.pass_context
 def cli(
     ctx,
-    url: str,
     decode: str,
     combine_ts: bool,
     base_url: str,
     find: str,
+    concurrency: int,
 ) -> None:
     if ctx.invoked_subcommand is None:
         asyncio.run(
             main(
-                url,
                 decode=decode,
                 combine_ts=combine_ts,
                 find=find,
                 base_url=base_url,
+                concurrency=concurrency,
             )
         )
 
