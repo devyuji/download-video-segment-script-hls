@@ -1,22 +1,20 @@
 import os
 import asyncio
 import aiohttp
-from curl_cffi import AsyncSession, Response, requests
-import json
 import subprocess
-from type import Decode, Segment, Header
 import click
+from curl_cffi import AsyncSession, Response, requests
 from urllib.parse import urlparse
 
-# from combine_m4s_files import combine_binary_merge
+from type import Decode, Segment, Header
+
+from utils.combine_m4s_files import combine_binary_merge
+from utils.get_headers import get_headers
 
 from decoder.decoder import Decoder
 from decoder.decode_playlist import DecodePlaylist
 from decoder.decode_failed_list import DecodeFailList
-# from decoder.decode_full_url import DecodeFullURL
-# from decoder.decode_full_with_initial import DecodeWithInitial
-# from decoder.decode_partial import DecodePartial
-# from decoder.decode_partial_initial import DecodePartialURLWithInitial
+
 
 from exporter.exportBinary import ExporterBinary
 from exporter.exportJSONFromDataClass import ExportJSONFromDataClass
@@ -26,6 +24,10 @@ from transformer.transformCleanData import TransformCleanData
 from transformer.transformEncryptedData import TransformEncryptedData
 from transformer.tranformFytp import TransformFYTPOrMOOF
 from transformer.transformNormal import TransformNormal
+
+
+TIMEOUT = 10 * 60
+TOTAL_RETRY = 10
 
 
 class Concurrency:
@@ -40,9 +42,9 @@ class DownloadSegment:
         concurrency: Concurrency,
         headers: Header,
         transformer: Transformer,
+        output_folder: str,
         file_extension: str = "ts",
         retry: bool = False,
-        output_folder: str = "segments",
     ):
         self.urls = urls
         self.concurrency = concurrency
@@ -59,7 +61,8 @@ class DownloadWithSpoof(DownloadSegment):
 
         async with requests.AsyncSession(
             impersonate="firefox147",
-            timeout=10 * 60,
+            timeout=TIMEOUT,
+            headers=self.headers,
         ) as session:
             tasks = [
                 self._download_segment(session, data.url, data.index)
@@ -85,10 +88,13 @@ class DownloadWithSpoof(DownloadSegment):
                         f"Downloading segment_{index}.{self.file_extension} - {count_retry}"
                     )
 
-                    h = self.headers | create_header_based_on_url(url)
+                    # h = self.headers | create_header_based_on_url(url)
 
                     await asyncio.sleep(0.2)
-                    response = await session.get(url=url, headers=h)
+                    response = await session.get(
+                        url=url,
+                        allow_redirects=True,
+                    )
                     response.raise_for_status()
 
                     file_path = os.path.join(
@@ -114,7 +120,7 @@ class DownloadWithSpoof(DownloadSegment):
                             index=index,
                         )
 
-                    if count_retry >= 10:
+                    if count_retry >= TOTAL_RETRY:
                         return Segment(
                             url=url,
                             index=index,
@@ -157,7 +163,7 @@ class DownloadNormal(DownloadSegment):
                     async with session.get(
                         url,
                         headers=h,
-                        timeout=aiohttp.ClientTimeout(100),
+                        timeout=aiohttp.ClientTimeout(TIMEOUT),
                         allow_redirects=True,
                     ) as response:
                         response.raise_for_status()
@@ -185,7 +191,7 @@ class DownloadNormal(DownloadSegment):
                             index=index,
                         )
 
-                    if count_retry >= 10:
+                    if count_retry >= TOTAL_RETRY:
                         return Segment(
                             url=url,
                             index=index,
@@ -228,11 +234,6 @@ def run_combine_video(output_folder: str) -> None:
     process.wait()
 
 
-def get_headers() -> Header:
-    with open("headers.json", "r") as f:
-        return json.load(f)
-
-
 def create_header_based_on_url(url: str) -> Header:
     parsed = urlparse(url)
     base_url = f"{parsed.netloc}"
@@ -241,10 +242,11 @@ def create_header_based_on_url(url: str) -> Header:
 
 async def main(
     decode: str,
-    combine_ts: bool,
     base_url: str,
     find: str,
-    concurrency: int,
+    x: int,
+    combine_ts: bool,
+    combine_mp4: bool,
 ) -> None:
 
     decoder: Decoder
@@ -256,20 +258,18 @@ async def main(
     m3u8_file = "playlist.txt"  # playlist file name
     extension = "ts"  # change this depending on m3u8_file
 
-    concurrency = Concurrency(concurrency)
+    concurrency = Concurrency(x)
     retry = False
 
     # -------------------- config ---------------------
 
     if combine_ts:
         run_combine_video(output_folder)
-
         return
 
-    # if combine_video_mp4:
-    #     combine_binary_merge(output_folder, extension)
-
-    #     return
+    if combine_mp4:
+        combine_binary_merge(output_folder, extension)
+        return
 
     headers = get_headers()
 
@@ -279,7 +279,7 @@ async def main(
     match decode:
         case "fail":
             decoder = DecodeFailList("fail.json")
-            retry = True
+            retry = False
 
         case _:
             decoder = DecodePlaylist(filename=m3u8_file, base=base_url, find=find)
@@ -288,12 +288,19 @@ async def main(
     segment_length = len(segment.urls)
 
     # ------------------- change this based on m3u8 file --------------------------
-    t = TransformCleanData()
+    if segment.is_encrypted:
+        t = TransformEncryptedData(
+            key=segment.key,
+            media_sequence_start=segment.media_sequence,
+        )
+
+    else:
+        t = TransformCleanData()
     # -----------------------------------------------------------------------------
 
     click.echo(f"Total segment {segment_length} found")
 
-    download = DownloadWithSpoof(
+    download = DownloadNormal(
         urls=segment.urls,
         concurrency=concurrency,
         headers=headers,
@@ -312,6 +319,7 @@ async def main(
             urls=failed_download,
             is_encrypted=segment.is_encrypted,
             key=segment.key,
+            media_sequence=segment.media_sequence,
         )
     )
 
@@ -327,6 +335,7 @@ async def main(
 @click.option("--base", "base_url", type=str, default="")
 @click.option("--find", "find", type=str, default="")
 @click.option("--combine-ts", "combine_ts", is_flag=True)
+@click.option("--combine-mp4", "combine_mp4", is_flag=True)
 @click.option(
     "-x",
     "concurrency",
@@ -337,10 +346,11 @@ async def main(
 def cli(
     ctx,
     decode: str,
-    combine_ts: bool,
     base_url: str,
     find: str,
     concurrency: int,
+    combine_ts: bool,
+    combine_mp4: bool,
 ) -> None:
     if ctx.invoked_subcommand is None:
         asyncio.run(
@@ -349,7 +359,8 @@ def cli(
                 combine_ts=combine_ts,
                 find=find,
                 base_url=base_url,
-                concurrency=concurrency,
+                x=concurrency,
+                combine_mp4=combine_mp4,
             )
         )
 

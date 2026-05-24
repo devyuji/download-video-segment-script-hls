@@ -14,19 +14,7 @@ Exporter -> it is to save the transform file.
 
 Change this depending on m3u8 file.
 
-## Types of decoder
-
-- "full" -> The playlist file in which all the url are present.
-
-- "fwi" -> The playlist file in which initial url is present.
-
-- "p" -> The playlist file in which partial url is present.
-
-- "pi" -> The playlist file in which partial url is present with initial (#EXT-INITIAL-URI=).
-
-- "fail" -> To download failed list
-
-When running the script default decoder is "fu" you can change them by providing --decode <type>
+## FLAGS
 
 `uv run vd --decode fwi`
 

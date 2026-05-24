@@ -37,4 +37,4 @@ class TransformFYTPOrMOOF:
 
         except Exception as err:
             print(err)
-            raise ValueError("unablet.to.decode.FYPT/MOOF.segment")
+            raise ValueError(f"unable.to.decode.FYPT/MOOF.segment - {index}")

@@ -1,4 +1,3 @@
-import json
 from typing import Any
 
 
@@ -8,5 +7,4 @@ class ExportJSONFromDataClass:
 
     def export(self, data: Any) -> None:
         with open(self.filename, "w") as f:
-            clean_dict = data.model_dump(mode="json")
-            json.dump(clean_dict, f, indent=4)
+            f.write(data.model_dump_json(indent=2))
