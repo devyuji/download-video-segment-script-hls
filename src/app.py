@@ -3,8 +3,8 @@ import asyncio
 import aiohttp
 import subprocess
 import click
-from curl_cffi import AsyncSession, Response, requests
 from urllib.parse import urlparse
+from playwright.async_api import Playwright, async_playwright
 
 from type import Decode, Segment, Header
 
@@ -56,17 +56,11 @@ class DownloadSegment:
         self.output_folder = output_folder
 
 
-class DownloadWithSpoof(DownloadSegment):
+class DownloadUsingBrowser(DownloadSegment):
     async def start(self) -> list[Segment]:
-
-        async with requests.AsyncSession(
-            impersonate="firefox147",
-            timeout=TIMEOUT,
-            headers=self.headers,
-        ) as session:
+        async with async_playwright() as p:
             tasks = [
-                self._download_segment(session, data.url, data.index)
-                for data in self.urls
+                self._download_segment(p, data.url, data.index) for data in self.urls
             ]
 
             rr = await asyncio.gather(*tasks)
@@ -74,59 +68,50 @@ class DownloadWithSpoof(DownloadSegment):
         return [item for item in rr if item is not None]
 
     async def _download_segment(
-        self,
-        session: AsyncSession[Response],
-        url: str,
-        index: int,
+        self, p: Playwright, url: str, index: int
     ) -> Segment | None:
-
-        count_retry = 1
         async with self.concurrency.limit:
-            while True:
-                try:
-                    click.echo(
-                        f"Downloading segment_{index}.{self.file_extension} - {count_retry}"
-                    )
+            try:
+                click.echo(f"Downloading segment_{index}.{self.file_extension}")
 
-                    # h = self.headers | create_header_based_on_url(url)
+                await asyncio.sleep(0.2)
+                browser = await p.chromium.launch(headless=True)
 
-                    await asyncio.sleep(0.2)
-                    response = await session.get(
-                        url=url,
-                        allow_redirects=True,
-                    )
-                    response.raise_for_status()
+                context = await browser.new_context(
+                    user_agent=self.headers["User-Agent"]
+                )
 
-                    file_path = os.path.join(
-                        self.output_folder, f"segment_{index}.{self.file_extension}"
-                    )
+                request_context = context.request
 
-                    content = response.content
+                h = self.headers | create_header_based_on_url(url)
 
-                    self.transformer.transform(
-                        content,
-                        exporter=ExporterBinary(file_path),
-                        index=index,
-                    )
-                    break
+                res = await request_context.get(url, headers=h)
 
-                except Exception as e:
-                    print(e)
-                    print(f"Failed to download {index} - {url}")
+                if not (res.ok):
+                    raise ValueError("response.error", res.status)
 
-                    if not (self.retry):
-                        return Segment(
-                            url=url,
-                            index=index,
-                        )
+                content = await res.body()
 
-                    if count_retry >= TOTAL_RETRY:
-                        return Segment(
-                            url=url,
-                            index=index,
-                        )
+                file_path = os.path.join(
+                    self.output_folder,
+                    f"segment_{index}.{self.file_extension}",
+                )
 
-                    count_retry += 1
+                await asyncio.to_thread(
+                    self.transformer.transform,
+                    content,
+                    ExporterBinary(file_path),
+                    index,
+                )
+
+            except Exception as err:
+                click.echo(err)
+                click.echo(f"Failed to download {index} - {url}")
+
+                return Segment(
+                    url=url,
+                    index=index,
+                )
 
 
 class DownloadNormal(DownloadSegment):
@@ -152,7 +137,7 @@ class DownloadNormal(DownloadSegment):
         async with self.concurrency.limit:
             while True:
                 try:
-                    print(
+                    click.echo(
                         f"Downloading segment_{index}.{self.file_extension} - {count_retry}"
                     )
 
@@ -161,7 +146,7 @@ class DownloadNormal(DownloadSegment):
                     h = self.headers | create_header_based_on_url(url)
 
                     async with session.get(
-                        url,
+                        url.strip(),
                         headers=h,
                         timeout=aiohttp.ClientTimeout(TIMEOUT),
                         allow_redirects=True,
@@ -174,12 +159,14 @@ class DownloadNormal(DownloadSegment):
 
                         content = await response.read()
 
-                        self.transformer.transform(
+                        await asyncio.to_thread(
+                            self.transformer.transform,
                             content,
-                            exporter=ExporterBinary(file_path),
-                            index=index,
+                            ExporterBinary(file_path),
+                            index,
                         )
-                    break
+
+                    return
 
                 except Exception as e:
                     print(e)
@@ -247,6 +234,7 @@ async def main(
     x: int,
     combine_ts: bool,
     combine_mp4: bool,
+    use_browser: bool,
 ) -> None:
 
     decoder: Decoder
@@ -279,7 +267,7 @@ async def main(
     match decode:
         case "fail":
             decoder = DecodeFailList("fail.json")
-            retry = False
+            retry = True
 
         case _:
             decoder = DecodePlaylist(filename=m3u8_file, base=base_url, find=find)
@@ -300,15 +288,26 @@ async def main(
 
     click.echo(f"Total segment {segment_length} found")
 
-    download = DownloadNormal(
-        urls=segment.urls,
-        concurrency=concurrency,
-        headers=headers,
-        transformer=t,
-        file_extension=extension,
-        output_folder=output_folder,
-        retry=retry,
-    )
+    if use_browser:
+        download = DownloadUsingBrowser(
+            urls=segment.urls,
+            concurrency=Concurrency(2),
+            headers=headers,
+            transformer=t,
+            file_extension=extension,
+            output_folder=output_folder,
+            retry=retry,
+        )
+    else:
+        download = DownloadNormal(
+            urls=segment.urls,
+            concurrency=concurrency,
+            headers=headers,
+            transformer=t,
+            file_extension=extension,
+            output_folder=output_folder,
+            retry=retry,
+        )
 
     failed_download = await download.start()
 
@@ -336,6 +335,7 @@ async def main(
 @click.option("--find", "find", type=str, default="")
 @click.option("--combine-ts", "combine_ts", is_flag=True)
 @click.option("--combine-mp4", "combine_mp4", is_flag=True)
+@click.option("--use-browser", "use_browser", is_flag=True)
 @click.option(
     "-x",
     "concurrency",
@@ -351,6 +351,7 @@ def cli(
     concurrency: int,
     combine_ts: bool,
     combine_mp4: bool,
+    use_browser: bool,
 ) -> None:
     if ctx.invoked_subcommand is None:
         asyncio.run(
@@ -361,6 +362,7 @@ def cli(
                 base_url=base_url,
                 x=concurrency,
                 combine_mp4=combine_mp4,
+                use_browser=use_browser,
             )
         )
 
@@ -390,3 +392,14 @@ async def async_paste(url: str) -> None:
 
     except Exception as err:
         print(err)
+
+
+@cli.command()
+def clean():
+    with open("playlist.txt", "w") as f:
+        f.write("")
+
+    with open("headers.json", "w") as f:
+        f.write("")
+
+    click.echo("Cleaned.")

@@ -46,9 +46,3 @@ class TransformEncryptedData:
 
         # 5. Save the perfectly clean, decrypted .ts file
         exporter.export(decrypted_clean_data)
-
-    def _raw_decrypt(self, data: bytes, iv: bytes, exporter: Exporter) -> None:
-        cipher_full = AES.new(self.key, AES.MODE_CBC, iv)
-        decrypted_clean_data = cipher_full.decrypt(data)
-
-        TransformNormal().transform(decrypted_clean_data, exporter)
