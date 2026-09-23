@@ -51,6 +51,10 @@ _Create a headers.json root folder and paste the header required for video._
 
 `uv run vd --base "https://example.com/1080p/" --find "video"`
 
+--exe Set file extension
+
+`uv run vd --exe "mp4"`
+
 --combine-ts "To combine segment ts into single mp4 file"
 
 `uv run vd --combine-ts`

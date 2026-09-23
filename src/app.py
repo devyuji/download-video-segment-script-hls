@@ -235,6 +235,7 @@ async def main(
     combine_ts: bool,
     combine_mp4: bool,
     use_browser: bool,
+    extension: str,
 ) -> None:
 
     decoder: Decoder
@@ -244,7 +245,7 @@ async def main(
     os.makedirs(output_folder, exist_ok=True)
 
     m3u8_file = "playlist.txt"  # playlist file name
-    extension = "ts"  # change this depending on m3u8_file
+    # extension = "mp3"  # change this depending on m3u8_file
 
     concurrency = Concurrency(x)
     retry = False
@@ -332,6 +333,7 @@ async def main(
 @click.option("--decode", "decode", type=str, default="")
 @click.option("-d", "decode", type=str, default="")
 @click.option("--base", "base_url", type=str, default="")
+@click.option("--exe", "extension", type=str, default="mp4")
 @click.option("--find", "find", type=str, default="")
 @click.option("--combine-ts", "combine_ts", is_flag=True)
 @click.option("--combine-mp4", "combine_mp4", is_flag=True)
@@ -352,6 +354,7 @@ def cli(
     combine_ts: bool,
     combine_mp4: bool,
     use_browser: bool,
+    extension: str,
 ) -> None:
     if ctx.invoked_subcommand is None:
         asyncio.run(
@@ -363,6 +366,7 @@ def cli(
                 x=concurrency,
                 combine_mp4=combine_mp4,
                 use_browser=use_browser,
+                extension=extension,
             )
         )
 

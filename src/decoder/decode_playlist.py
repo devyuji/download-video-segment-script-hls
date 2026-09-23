@@ -17,15 +17,10 @@ class DecodePlaylist:
 
     async def decode(self) -> Decode:
         index = 0
-        # urls: list[Segment] = []
-        # is_encrypted = False
-        # key = b""
         d = Decode(urls=[])
 
         with open(self.filename, "r") as f:
             for line in f:
-                u = ""
-
                 # Check for initial url
                 if line.startswith("#EXT-X-MAP"):
                     match = re.search(r'URI="([^"]+)"', line)
