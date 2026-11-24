@@ -281,6 +281,7 @@ async def main(
         t = TransformEncryptedData(
             key=segment.key,
             media_sequence_start=segment.media_sequence,
+            iv=segment.iv,
         )
 
     else:

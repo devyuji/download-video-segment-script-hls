@@ -17,6 +17,7 @@ class Decode(BaseModel):
     is_encrypted: bool = False
     key: bytes = b""
     media_sequence: int = 0
+    iv: bytes | None = None
 
     @field_serializer("key")
     def serialize_key(self, key: bytes) -> str:

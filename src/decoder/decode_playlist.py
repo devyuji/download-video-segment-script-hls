@@ -49,10 +49,16 @@ class DecodePlaylist:
                 elif line.startswith("#EXT-X-KEY"):
                     d.is_encrypted = True
 
-                    match = re.search(r'URI="([^"]+)"', line)
+                    match = re.search(r'URI="([^"]+)"(?:.*?IV=([^,\s]+))?', line)
 
                     if match:
                         key_uri = match.group(1)
+                        iv = match.group(2)
+
+                        if iv:
+                            iv = bytes.fromhex(iv.replace("0x", ""))
+                            d.iv = iv
+                            print(f"IV Bytes: {iv}")
 
                         headers = get_headers()
 

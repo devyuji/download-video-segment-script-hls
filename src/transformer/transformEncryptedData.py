@@ -1,22 +1,34 @@
 from exporter.exporter import Exporter
 from Crypto.Cipher import AES
-from transformer.transformNormal import TransformNormal
 
 
 class TransformEncryptedData:
-    def __init__(self, key: bytes, media_sequence_start: int = 0):
+    def __init__(
+        self, key: bytes, media_sequence_start: int = 0, iv: bytes | None = None
+    ):
         self.key = key
         self.media_sequence_start = media_sequence_start  # X-MEDIA-SEQUENCE
+        self.iv = iv
 
-    def transform(self, data: bytes, exporter: Exporter, index: int = 0) -> None:
+    def transform(
+        self,
+        data: bytes,
+        exporter: Exporter,
+        index: int = 0,
+    ) -> None:
         """
         Strips the plaintext HTML disguise and decrypts the AES-128 CBC payload.
 
         :param data: The raw binary downloaded from the .html URL
         """
-        sequence_num = index + self.media_sequence_start
 
-        iv = sequence_num.to_bytes(16, byteorder="big")
+        iv = None
+
+        if self.iv:
+            iv = self.iv
+        else:
+            sequence_num = index + self.media_sequence_start
+            iv = sequence_num.to_bytes(16, byteorder="big")
 
         max_search = min(len(data), 2048)
         decrypted_clean_data = None
